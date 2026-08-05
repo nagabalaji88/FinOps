@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-worker
+  namespace: finops
+  labels: { app: finops-worker, component: worker }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: finops-worker }
+  template:
+    metadata:
+      labels: { app: finops-worker, component: worker }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: worker
+          image: ghcr.io/finops/agent-api:1.0.0
+          command: ["celery"]
+          args: ["-A", "app.workers.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
+          envFrom:
+            - configMapRef: { name: finops-config }
+            - secretRef: { name: finops-secrets }
+          resources:
+            requests: { cpu: 300m, memory: 768Mi }
+            limits: { cpu: "2", memory: 2Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-beat
+  namespace: finops
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: finops-beat }
+  template:
+    metadata:
+      labels: { app: finops-beat, component: scheduler }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 10001 }
+      containers:
+        - name: beat
+          image: ghcr.io/finops/agent-api:1.0.0
+          command: ["celery"]
+          args: ["-A", "app.workers.celery_app.celery_app", "beat", "--loglevel=info"]
+          envFrom:
+            - configMapRef: { name: finops-config }
+            - secretRef: { name: finops-secrets }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: finops-retention
+  namespace: finops
+spec:
+  schedule: "30 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: retention
+              image: ghcr.io/finops/agent-api:1.0.0
+              command: ["python", "-m", "app.cli", "retention", "--apply"]
+              envFrom:
+                - configMapRef: { name: finops-config }
+                - secretRef: { name: finops-secrets }

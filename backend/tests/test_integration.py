@@ -8,7 +8,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from app.db.models.agents import Approval, Execution, Span
+from app.db.models.agents import Approval, Span
 from app.db.models.banking import Customer
 from app.db.session import SessionFactory
 from tests.conftest import TEST_MODEL

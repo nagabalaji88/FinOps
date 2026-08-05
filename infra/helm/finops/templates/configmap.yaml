@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "finops.fullname" . }}-config
+  labels: {{- include "finops.labels" . | nindent 4 }}
+data:
+  ENVIRONMENT: {{ .Values.config.environment | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  LOG_JSON: "true"
+  DEFAULT_MODEL: {{ .Values.config.defaultModel | quote }}
+  DEFAULT_EMBEDDING_MODEL: {{ .Values.config.defaultEmbeddingModel | quote }}
+  DAILY_COST_BUDGET_USD: {{ .Values.config.dailyCostBudgetUsd | quote }}
+  MONTHLY_COST_BUDGET_USD: {{ .Values.config.monthlyCostBudgetUsd | quote }}
+  PER_EXECUTION_COST_CAP_USD: {{ .Values.config.perExecutionCostCapUsd | quote }}
+  MAX_CONCURRENT_EXECUTIONS: {{ .Values.config.maxConcurrentExecutions | quote }}
+  EXECUTION_TIMEOUT_SECONDS: {{ .Values.config.executionTimeoutSeconds | quote }}
+  DATA_RETENTION_DAYS: {{ .Values.config.dataRetentionDays | quote }}
+  RATE_LIMIT_PER_MINUTE: {{ .Values.config.rateLimitPerMinute | quote }}
+  CORS_ORIGINS: {{ .Values.config.corsOrigins | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.config.otelEndpoint | quote }}
+  {{- if .Values.redis.enabled }}
+  REDIS_URL: redis://{{ .Release.Name }}-redis-master:6379/0
+  CELERY_BROKER_URL: redis://{{ .Release.Name }}-redis-master:6379/1
+  CELERY_RESULT_BACKEND: redis://{{ .Release.Name }}-redis-master:6379/2
+  {{- end }}
+  {{- with .Values.config.qdrantUrl }}
+  QDRANT_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.kafkaBootstrapServers }}
+  KAFKA_BOOTSTRAP_SERVERS: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.elasticsearchUrl }}
+  ELASTICSEARCH_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.neo4jUri }}
+  NEO4J_URI: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.minioEndpoint }}
+  MINIO_ENDPOINT: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.keycloakUrl }}
+  KEYCLOAK_URL: {{ . | quote }}
+  KEYCLOAK_REALM: {{ $.Values.config.keycloakRealm | quote }}
+  {{- end }}
+  {{- with .Values.config.vaultAddr }}
+  VAULT_ADDR: {{ . | quote }}
+  {{- end }}

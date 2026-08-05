@@ -14,7 +14,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import BaseModel, ValidationError as PydanticValidationError
+from pydantic import BaseModel
+from pydantic import ValidationError as PydanticValidationError
 
 from app.core.errors import AppError, NotFoundError, ValidationError
 from app.core.logging import get_logger
@@ -183,7 +184,7 @@ class ToolRegistry:
             tool_latency.labels(name).observe(latency / 1000)
             await self._record(tool, result, "healthy")
             return result
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             latency = (time.perf_counter() - started) * 1000
             result = ToolResult(ok=False, tool=name, error=f"Tool timed out after "
                                 f"{tool.timeout_seconds}s", latency_ms=latency, retries=retries)

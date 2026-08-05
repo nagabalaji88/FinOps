@@ -9,8 +9,8 @@ from fastapi import APIRouter, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.api.deps import PrincipalDep, SessionDep, write_audit
 from app.agents.registry import ROADMAP, agent_registry
+from app.api.deps import PrincipalDep, SessionDep, write_audit
 from app.core.bus import AGENT_CHANNEL, bus
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.core.rbac import Permission

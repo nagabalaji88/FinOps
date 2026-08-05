@@ -348,7 +348,9 @@ async def upload_document(
             except Exception as exc:
                 raise ValidationError(f"Unable to extract text from PDF: {exc}") from exc
         else:
-            raise ValidationError("Only UTF-8 text or PDF uploads are supported")
+            raise ValidationError(
+                "Only UTF-8 text or PDF uploads are supported"
+            ) from None
 
     stored = await store.put(f"knowledge/{key}/{file.filename}", raw,
                              file.content_type or "text/plain")

@@ -213,7 +213,7 @@ class ModelRouter:
 
             try:
                 response = await with_retry(
-                    lambda p=provider, c=candidate: breaker.call(lambda: _call(p, c)),
+                    lambda p=provider, c=candidate, b=breaker: b.call(lambda: _call(p, c)),
                     RetryPolicy(max_attempts=settings.llm_max_retries, base_delay=0.6,
                                 give_up_on=(ProviderNotConfiguredError,)),
                     name=f"llm:{candidate.id}",

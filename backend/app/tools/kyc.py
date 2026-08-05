@@ -22,7 +22,6 @@ from app.core.errors import NotFoundError, ProviderNotConfiguredError, Validatio
 from app.core.storage import store
 from app.db.models.banking import KycCase, KycDocument, SanctionsEntry
 from app.llm.router import router
-from app.llm.types import Message
 from app.tools.base import ToolContext, tool
 
 # --- checksum algorithms ------------------------------------------------------
@@ -167,8 +166,8 @@ async def _ocr_bytes(data: bytes, mime_type: str) -> tuple[str, str]:
             ]}],
             "max_tokens": 2000, "model": spec.id,
         }
-        from app.llm.base import http_client
         from app.core.config import settings as _s
+        from app.llm.base import http_client
 
         resp = await http_client().post(
             f"{_s.anthropic_base_url}/v1/messages",
@@ -476,8 +475,8 @@ async def face_match(args: FaceMatchArgs, ctx: ToolContext) -> dict[str, Any]:
         '{"same_person_likelihood": 0.0-1.0, "quality_issues": ["..."], "reasoning": "..."} '
         "Base the likelihood on facial geometry, not clothing or background."
     )
-    from app.llm.base import http_client
     from app.core.config import settings as _s
+    from app.llm.base import http_client
 
     spec = vision[0]
     if spec.provider == "anthropic":

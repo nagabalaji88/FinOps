@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-web
+  namespace: finops
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: finops-web }
+  template:
+    metadata:
+      labels: { app: finops-web, component: web }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 101 }
+      containers:
+        - name: web
+          image: ghcr.io/finops/agent-web:1.0.0
+          ports: [{ name: http, containerPort: 8080 }]
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { cpu: 300m, memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: cache, mountPath: /var/cache/nginx }
+            - { name: run, mountPath: /var/run }
+      volumes:
+        - { name: cache, emptyDir: {} }
+        - { name: run, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: finops-web
+  namespace: finops
+spec:
+  selector: { app: finops-web }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: finops
+  namespace: finops
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 32m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/enable-cors: "false"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [finops.example.com]
+      secretName: finops-tls
+  rules:
+    - host: finops.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: finops-api, port: { number: 8000 } } }
+          - path: /health
+            pathType: Prefix
+            backend: { service: { name: finops-api, port: { number: 8000 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: finops-web, port: { number: 80 } } }

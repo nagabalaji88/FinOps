@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Float, JSON, String, Text, TypeDecorator, func
+from sqlalchemy import JSON, DateTime, Float, String, Text, TypeDecorator, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 

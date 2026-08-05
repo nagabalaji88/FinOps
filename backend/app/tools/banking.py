@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 
 from app.core.errors import NotFoundError, ValidationError
-from app.core.security import hash_password, verify_password
+from app.core.security import verify_password
 from app.db.models.banking import Account, Card, Customer, FAQEntry, Loan, Ticket, Transaction
 from app.tools.base import ToolContext, tool
 

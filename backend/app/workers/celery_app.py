@@ -93,8 +93,8 @@ def sync_knowledge() -> dict[str, Any]:
 @celery_app.task(name="finops.run_transaction_monitoring")
 def run_transaction_monitoring(days: int = 7) -> dict[str, Any]:
     from app.db.session import session_scope
-    from app.tools.base import ToolContext, registry
     from app.tools import aml  # noqa: F401 - ensures registration
+    from app.tools.base import ToolContext, registry
 
     async def run() -> dict[str, Any]:
         async with session_scope() as session:

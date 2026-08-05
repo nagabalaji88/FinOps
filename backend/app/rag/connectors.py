@@ -247,7 +247,7 @@ class SharePointConnector(Connector):
                 for section in layout.get("horizontalSections", []):
                     for column in section.get("columns", []):
                         for webpart in column.get("webparts", []):
-                            body += _strip_html((webpart.get("innerHtml") or "")) + "\n"
+                            body += _strip_html(webpart.get("innerHtml") or "") + "\n"
             documents.append({
                 "external_id": page["id"],
                 "title": page.get("title", "SharePoint page"),
