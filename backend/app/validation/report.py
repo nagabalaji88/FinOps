@@ -1,0 +1,146 @@
+"""Report rendering for conformance runs: Markdown for humans, JSON for pipelines."""
+
+from __future__ import annotations
+
+import json
+
+from app.validation.runner import ScenarioResult, ValidationReport
+
+VERDICT_MARK = {"passed": "PASS", "failed": "FAIL", "blocked": "BLOCKED", "error": "ERROR"}
+
+
+def to_json(report: ValidationReport, *, indent: int = 2) -> str:
+    return json.dumps(report.to_dict(), indent=indent, default=str)
+
+
+def _scenario_section(result: ScenarioResult) -> list[str]:
+    lines = [
+        f"### {result.scenario.id} · {result.scenario.title} — **{VERDICT_MARK[result.verdict]}**",
+        "",
+        f"_{result.scenario.rationale}_",
+        "",
+        f"- Agent: `{result.scenario.agent_key}`",
+        f"- Input: `{json.dumps(result.scenario.payload, default=str)}`",
+    ]
+    if result.observed:
+        observed = result.observed
+        lines += [
+            f"- Execution: `{observed.execution_id}` · trace `{observed.trace_id}`",
+            f"- Status: `{observed.status}` · {observed.span_count} spans · "
+            f"{observed.llm_calls} LLM calls · {len(observed.tool_invocations)} tool calls",
+            f"- Cost: ${observed.cost_usd:.5f} · Latency: {observed.latency_ms} ms · "
+            f"Tokens: {observed.tokens}",
+        ]
+        if observed.tool_invocations:
+            tools = ", ".join(
+                f"`{name}`{'' if ok else ' (failed)'}" for name, ok in observed.tool_invocations
+            )
+            lines.append(f"- Tools: {tools}")
+        if observed.approvals:
+            approvals = ", ".join(
+                f"`{(a.get('payload') or {}).get('tool', a.get('node'))}` → {a['status']}"
+                for a in observed.approvals
+            )
+            lines.append(f"- Approvals: {approvals}")
+    if result.note:
+        lines.append(f"- Note: {result.note}")
+
+    if result.checks:
+        lines += ["", "| Check | Result | Detail |", "|---|---|---|"]
+        for check in result.checks:
+            mark = {"pass": "pass", "fail": "**FAIL**", "skip": "skip"}[check.outcome]
+            if check.failed and not check.critical:
+                mark = "warn"
+            detail = check.detail.replace("|", "\\|")
+            lines.append(f"| `{check.name}` | {mark} | {detail} |")
+
+    if result.observed and result.observed.final_response:
+        excerpt = result.observed.final_response.strip()
+        if len(excerpt) > 600:
+            excerpt = excerpt[:600].rstrip() + " …"
+        lines += ["", "<details><summary>Response</summary>", "", "```text", excerpt, "```", "",
+                  "</details>"]
+    lines.append("")
+    return lines
+
+
+def to_markdown(report: ValidationReport) -> str:
+    summary = report.to_dict()["summary"]
+    lines = [
+        "# Agent conformance report",
+        "",
+        f"Run {report.started_at.isoformat()} → {report.finished_at.isoformat()} "
+        f"({(report.finished_at - report.started_at).total_seconds():.1f}s)",
+        "",
+        "## Summary",
+        "",
+        "| Scenarios | Passed | Failed | Blocked | Errored | Spend |",
+        "|---|---|---|---|---|---|",
+        f"| {summary['total']} | {summary['passed']} | {summary['failed']} | "
+        f"{summary['blocked']} | {summary['errored']} | ${summary['total_cost_usd']:.5f} |",
+        "",
+    ]
+
+    if report.preflight.get("warnings"):
+        lines += ["### Preflight warnings", ""]
+        lines += [f"- {warning}" for warning in report.preflight["warnings"]]
+        lines.append("")
+
+    lines += [
+        "### By agent",
+        "",
+        "| Agent | Scenarios | Passed | Failed | Blocked | Errored |",
+        "|---|---|---|---|---|---|",
+    ]
+    for agent_key, counts in report.to_dict()["by_agent"].items():
+        lines.append(
+            f"| `{agent_key}` | {counts['total']} | {counts['passed']} | {counts['failed']} | "
+            f"{counts['blocked']} | {counts['errored']} |"
+        )
+    lines.append("")
+
+    lines += ["### Scenario index", "", "| ID | Agent | Scenario | Verdict | Checks |", "|---|---|---|---|---|"]
+    for result in report.results:
+        passed = sum(1 for c in result.checks if c.outcome == "pass")
+        lines.append(
+            f"| `{result.scenario.id}` | `{result.scenario.agent_key}` | {result.scenario.title} | "
+            f"**{VERDICT_MARK[result.verdict]}** | {passed}/{len(result.checks)} |"
+        )
+    lines.append("")
+
+    failures = [r for r in report.results if r.verdict in {"failed", "error"}]
+    if failures:
+        lines += ["## Failures", ""]
+        for result in failures:
+            lines += _scenario_section(result)
+
+    lines += ["## All scenarios", ""]
+    for result in report.results:
+        lines += _scenario_section(result)
+
+    return "\n".join(lines)
+
+
+def to_console(report: ValidationReport) -> str:
+    """Compact terminal summary."""
+    lines = []
+    for result in report.results:
+        mark = VERDICT_MARK[result.verdict]
+        detail = ""
+        if result.verdict == "failed":
+            detail = "; ".join(f"{c.name}: {c.detail}" for c in result.failed_checks[:3])
+        elif result.verdict in {"blocked", "error"}:
+            detail = result.note
+        lines.append(
+            f"  [{mark:7}] {result.scenario.id:7} {result.scenario.agent_key:22} "
+            f"{result.scenario.title[:44]:44} {result.duration_ms:>7} ms"
+            + (f"\n            → {detail}" if detail else "")
+        )
+    summary = report.to_dict()["summary"]
+    lines += [
+        "",
+        f"  {summary['passed']} passed · {summary['failed']} failed · "
+        f"{summary['blocked']} blocked · {summary['errored']} errored "
+        f"· ${summary['total_cost_usd']:.5f} spent",
+    ]
+    return "\n".join(lines)

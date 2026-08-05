@@ -135,16 +135,38 @@ Details in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ---
 
+## Conformance suite
+
+Twenty scenario inputs across the five agents, plus an execution validation agent that
+routes each one to its agent, runs it for real, reviews any approval gate it hits, and
+asserts the expected behaviour.
+
+```bash
+cd backend
+.venv/bin/python -m app.cli validate                        # all 20
+.venv/bin/python -m app.cli validate --agent aml_investigation
+.venv/bin/python -m app.cli validate --tag hitl --output report.md
+.venv/bin/python -m app.cli validate --fail-on-blocked      # strict CI mode
+```
+
+Assertions are structural — which tools ran, whether an approval was raised, whether the
+answer is cited, whether a guardrail fired, cost against cap, trace integrity — plus
+narrow content checks where a specific fact matters. Verdicts are `passed`, `failed`,
+`blocked` (environment gap, e.g. no provider key) or `error`. Details in
+[`docs/VALIDATION.md`](docs/VALIDATION.md).
+
 ## Testing
 
 ```bash
-cd backend && .venv/bin/pytest -q       # 58 unit + integration tests
+cd backend && .venv/bin/pytest -q       # 90 unit, integration and conformance tests
 cd frontend && npm run test && npm run typecheck && npm run build
 ```
 
 The integration suite drives the whole graph through a scripted provider double: tool
 calling, approval suspend/resume, guardrail PII masking, trace and event assertions.
-The double lives in `tests/conftest.py` and is never registered by the application.
+The double lives in `tests/conftest.py` and is never registered by the application. The
+conformance harness is itself tested — every assertion is proven to fail when it should,
+and the runner is exercised end to end including a caught hallucination.
 
 ---
 
@@ -156,6 +178,7 @@ The double lives in `tests/conftest.py` and is never registered by the applicati
 - [`docs/SECURITY.md`](docs/SECURITY.md) — RBAC matrix, auth flows, secrets, audit, data handling
 - [`docs/AGENTS.md`](docs/AGENTS.md) — agent contracts, tool catalogue, building a new agent
 - [`docs/API.md`](docs/API.md) — endpoint reference and streaming protocol
+- [`docs/VALIDATION.md`](docs/VALIDATION.md) — the 20 scenarios, assertions and the validation agent
 - [`docs/BANKING_CONFIGURATION.md`](docs/BANKING_CONFIGURATION.md) — sample enterprise configuration
 
 ---

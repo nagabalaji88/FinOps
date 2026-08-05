@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1 import agents, auth, dashboard, executions, operations, platform
+from app.api.v1 import agents, auth, dashboard, executions, operations, platform, validation
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
@@ -19,3 +19,4 @@ api_router.include_router(platform.services_router)
 api_router.include_router(platform.knowledge_router)
 api_router.include_router(platform.playground_router)
 api_router.include_router(platform.evals_router)
+api_router.include_router(validation.router)

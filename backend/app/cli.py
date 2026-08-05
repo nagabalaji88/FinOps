@@ -7,6 +7,7 @@ import asyncio
 import csv
 import io
 import json
+import pathlib
 import sys
 from datetime import UTC, datetime, timedelta
 
@@ -143,6 +144,71 @@ async def cmd_retention(dry_run: bool) -> None:
                       "records": summary}, indent=2))
 
 
+async def cmd_validate(
+    agent: str | None,
+    scenario_ids: list[str] | None,
+    tag: str | None,
+    output: str | None,
+    fmt: str,
+    concurrency: int,
+    reviewer: str,
+    fail_on_blocked: bool,
+) -> int:
+    """Run the conformance suite and validate every agent response."""
+    from app.rag.embeddings import active_dimensions
+    from app.rag.vectorstore import init_vector_store
+    from app.services import telemetry
+    from app.tools import registry  # noqa: F401 - registers tools
+    from app.validation import SCENARIOS, ValidationRunner, to_console, to_json, to_markdown
+
+    await init_vector_store(active_dimensions())
+    telemetry.install()
+
+    selected = list(SCENARIOS)
+    if agent:
+        selected = [s for s in selected if s.agent_key == agent]
+    if scenario_ids:
+        wanted = {s.strip().upper() for s in scenario_ids}
+        selected = [s for s in selected if s.id.upper() in wanted]
+    if tag:
+        selected = [s for s in selected if tag in s.tags]
+    if not selected:
+        print("No scenarios matched the filters.")
+        return 2
+
+    validation_runner = ValidationRunner(reviewer_email=reviewer, concurrency=concurrency)
+    preflight = await validation_runner.preflight(selected)
+    for warning in preflight.get("warnings", []):
+        print(f"  ! {warning}")
+    if preflight.get("warnings"):
+        print()
+    print(f"Running {len(selected)} scenario(s) across "
+          f"{len({s.agent_key for s in selected})} agent(s)\n")
+
+    def announce(result) -> None:
+        mark = {"passed": "PASS", "failed": "FAIL", "blocked": "BLOCKED",
+                "error": "ERROR"}[result.verdict]
+        print(f"  [{mark:7}] {result.scenario.id:7} {result.scenario.title}")
+
+    report = await validation_runner.run(selected, on_result=announce)
+    print("\n" + to_console(report))
+
+    if output:
+        rendered = to_json(report) if fmt == "json" else to_markdown(report)
+        path = pathlib.Path(output)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(rendered)
+        print(f"\n  Report written to {path}")
+
+    if not report.ok:
+        return 1
+    if fail_on_blocked and report.blocked:
+        print(f"\n  {report.blocked} scenario(s) could not be evaluated "
+              f"and --fail-on-blocked is set.")
+        return 3
+    return 0
+
+
 async def cmd_health() -> None:
     from app.core.cache import cache
     from app.db.session import ping_database
@@ -201,6 +267,21 @@ def main() -> None:
     retention = sub.add_parser("retention", help="Apply the data retention policy")
     retention.add_argument("--apply", action="store_true", help="Delete instead of reporting")
     sub.add_parser("health", help="Report platform and provider health")
+    validate = sub.add_parser("validate",
+                              help="Run the conformance suite against the implemented agents")
+    validate.add_argument("--agent", default=None, help="Restrict to one agent key")
+    validate.add_argument("--scenario", action="append", default=None,
+                          help="Run specific scenario ids (repeatable)")
+    validate.add_argument("--tag", default=None, help="Restrict to scenarios carrying a tag")
+    validate.add_argument("--output", default=None, help="Write the report to this path")
+    validate.add_argument("--format", dest="fmt", default="markdown",
+                          choices=["markdown", "json"])
+    validate.add_argument("--concurrency", type=int, default=1)
+    validate.add_argument("--reviewer", default="approver@finops.local",
+                          help="Identity used to decide approval gates")
+    validate.add_argument("--fail-on-blocked", action="store_true",
+                          help="Exit non-zero when a scenario cannot be evaluated "
+                               "(for example because no LLM provider is configured)")
     run = sub.add_parser("run-agent", help="Execute an agent from the command line")
     run.add_argument("agent_key")
     run.add_argument("--input", default="{}")
@@ -216,11 +297,16 @@ def main() -> None:
         "retention": lambda: cmd_retention(not args.apply),
         "health": lambda: cmd_health(),
         "run-agent": lambda: cmd_run_agent(args.agent_key, args.input, args.user),
+        "validate": lambda: cmd_validate(args.agent, args.scenario, args.tag, args.output,
+                                         args.fmt, args.concurrency, args.reviewer,
+                                         args.fail_on_blocked),
     }
     try:
-        asyncio.run(commands[args.command]())
+        exit_code = asyncio.run(commands[args.command]())
     except KeyboardInterrupt:
         sys.exit(130)
+    if isinstance(exit_code, int) and exit_code:
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":
