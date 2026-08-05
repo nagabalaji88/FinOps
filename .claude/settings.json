@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(python --version)",
+      "PowerShell(py -3 --version)",
+      "PowerShell(py --list)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\pip.exe install -e \".[dev]\" 2>&1)",
+      "PowerShell(tail -30)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\alembic.exe upgrade head)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m app.cli init-db)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m app.cli seed-banking --customers 24)",
+      "Bash(.venv/Scripts/python.exe -c \"import os; from dotenv import load_dotenv; load_dotenv\\('../.env'\\); print\\('OPENAI_API_KEY:', os.getenv\\('OPENAI_API_KEY'\\)[:20] + '...' if os.getenv\\('OPENAI_API_KEY'\\) else 'NOT SET'\\)\")",
+      "PowerShell(ollama --version)"
+    ]
+  }
+}
