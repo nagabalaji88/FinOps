@@ -1,5 +1,9 @@
 # Agents and tools
 
+This is the engineering view: how an agent is declared, how tools are written and how
+the domain algorithms work. For the business-facing view — what each agent does step by
+step and where a human decides — see [`PROCESS.md`](PROCESS.md).
+
 ## Agent contract
 
 An agent is an `AgentSpec` (`backend/app/agents/base.py`) — a declaration, not code. The

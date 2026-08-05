@@ -176,6 +176,7 @@ and the runner is exercised end to end including a caught hallucination.
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — Compose, Kubernetes, Helm, scaling, backup and restore
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — runbooks, alerts, incident response, retention
 - [`docs/SECURITY.md`](docs/SECURITY.md) — RBAC matrix, auth flows, secrets, audit, data handling
+- [`docs/PROCESS.md`](docs/PROCESS.md) — what each agent does, step by step, and where a human decides
 - [`docs/AGENTS.md`](docs/AGENTS.md) — agent contracts, tool catalogue, building a new agent
 - [`docs/API.md`](docs/API.md) — endpoint reference and streaming protocol
 - [`docs/VALIDATION.md`](docs/VALIDATION.md) — the 20 scenarios, assertions and the validation agent
