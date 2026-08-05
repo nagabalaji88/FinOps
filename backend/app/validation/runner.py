@@ -152,6 +152,46 @@ class ValidationReport:
         return out
 
 
+async def prepare_environment(scenarios: list[Scenario], *, seed_sample: bool = True) -> dict[str, Any]:
+    """Make the platform ready to run the suite, doing only what is still missing.
+
+    A conformance run should be one command. This creates the schema, seeds the platform
+    (identities, agent registry, knowledge corpus, watchlists) and loads the sample banking
+    dataset when scenarios need it. Every step is idempotent, so running it against an
+    already-prepared deployment is a no-op that costs one query.
+    """
+    from app.services.bootstrap import bootstrap, ensure_schema, seed_sample_banking
+
+    steps: list[dict[str, Any]] = []
+
+    await ensure_schema()
+    steps.append({"step": "schema", "action": "ensured"})
+
+    async with session_scope() as session:
+        registered = int((await session.execute(select(func.count(Agent.id)))).scalar_one())
+        if registered == 0:
+            result = await bootstrap(session)
+            steps.append({"step": "platform_seed", "action": "seeded", **result})
+        else:
+            steps.append({"step": "platform_seed", "action": "already_present",
+                          "agents": registered})
+
+    needs_sample = any(s.requires_sample_data for s in scenarios)
+    if needs_sample and seed_sample:
+        async with session_scope() as session:
+            customers = int((await session.execute(select(func.count(Customer.id)))).scalar_one())
+            if customers == 0:
+                result = await seed_sample_banking(session)
+                steps.append({"step": "sample_banking", "action": "seeded", **result})
+            else:
+                steps.append({"step": "sample_banking", "action": "already_present",
+                              "customers": customers})
+    elif needs_sample:
+        steps.append({"step": "sample_banking", "action": "skipped"})
+
+    return {"prepared": True, "steps": steps}
+
+
 class ValidationRunner:
     """Executes scenarios against the live platform and validates what comes back."""
 

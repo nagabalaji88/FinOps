@@ -239,9 +239,9 @@ jobs:
             | python -c 'import sys,json; d=json.load(sys.stdin); assert d["total"]==20, d["total"]'
           echo "smoke suite passed"
 
-      - name: Conformance suite (reports BLOCKED without a provider key)
+      - name: Conformance suite (self-preparing; BLOCKED without a provider key)
         run: |
-          python -m app.cli validate --output conformance.md
+          python -m app.cli validate --quiet --output conformance.md
         env:
           ENVIRONMENT: local
           LOG_JSON: "false"

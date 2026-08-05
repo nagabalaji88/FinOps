@@ -153,16 +153,22 @@ async def cmd_validate(
     concurrency: int,
     reviewer: str,
     fail_on_blocked: bool,
+    setup: bool = True,
+    show_output: bool = True,
 ) -> int:
-    """Run the conformance suite and validate every agent response."""
+    """Run every scenario input through its agent, in order, and report the results.
+
+    Self-contained by default: it prepares the database, seeds the platform and loads the
+    sample banking dataset if they are missing, then executes the inputs one at a time and
+    prints each agent's result as it arrives.
+    """
     from app.rag.embeddings import active_dimensions
     from app.rag.vectorstore import init_vector_store
     from app.services import telemetry
     from app.tools import registry  # noqa: F401 - registers tools
     from app.validation import SCENARIOS, ValidationRunner, to_console, to_json, to_markdown
-
-    await init_vector_store(active_dimensions())
-    telemetry.install()
+    from app.validation.report import format_live
+    from app.validation.runner import prepare_environment
 
     selected = list(SCENARIOS)
     if agent:
@@ -176,22 +182,40 @@ async def cmd_validate(
         print("No scenarios matched the filters.")
         return 2
 
+    if setup:
+        print("Preparing the environment ...")
+        prepared = await prepare_environment(selected)
+        for step in prepared["steps"]:
+            detail = {k: v for k, v in step.items() if k not in {"step", "action"}}
+            print(f"  {step['step']:<16} {step['action']}"
+                  + (f"  {json.dumps(detail)}" if detail else ""))
+        print()
+
+    await init_vector_store(active_dimensions())
+    telemetry.install()
+
     validation_runner = ValidationRunner(reviewer_email=reviewer, concurrency=concurrency)
     preflight = await validation_runner.preflight(selected)
     for warning in preflight.get("warnings", []):
         print(f"  ! {warning}")
     if preflight.get("warnings"):
         print()
-    print(f"Running {len(selected)} scenario(s) across "
-          f"{len({s.agent_key for s in selected})} agent(s)\n")
+
+    providers = preflight.get("configured_providers") or ["none"]
+    order = "sequentially" if concurrency == 1 else f"{concurrency} at a time"
+    print(f"Running {len(selected)} input(s) {order} across "
+          f"{len({s.agent_key for s in selected})} agent(s) · providers: {', '.join(providers)}")
+
+    position = {"n": 0}
 
     def announce(result) -> None:
-        mark = {"passed": "PASS", "failed": "FAIL", "blocked": "BLOCKED",
-                "error": "ERROR"}[result.verdict]
-        print(f"  [{mark:7}] {result.scenario.id:7} {result.scenario.title}")
+        position["n"] += 1
+        print(format_live(position["n"], len(selected), result, show_output=show_output),
+              flush=True)
 
     report = await validation_runner.run(selected, on_result=announce)
-    print("\n" + to_console(report))
+    print("\n" + "=" * 96)
+    print(to_console(report))
 
     if output:
         rendered = to_json(report) if fmt == "json" else to_markdown(report)
@@ -282,6 +306,11 @@ def main() -> None:
     validate.add_argument("--fail-on-blocked", action="store_true",
                           help="Exit non-zero when a scenario cannot be evaluated "
                                "(for example because no LLM provider is configured)")
+    validate.add_argument("--no-setup", dest="setup", action="store_false",
+                          help="Skip environment preparation and assume the database is "
+                               "already migrated and seeded")
+    validate.add_argument("--quiet", dest="show_output", action="store_false",
+                          help="Print verdicts only, without each agent's response")
     run = sub.add_parser("run-agent", help="Execute an agent from the command line")
     run.add_argument("agent_key")
     run.add_argument("--input", default="{}")
@@ -299,7 +328,7 @@ def main() -> None:
         "run-agent": lambda: cmd_run_agent(args.agent_key, args.input, args.user),
         "validate": lambda: cmd_validate(args.agent, args.scenario, args.tag, args.output,
                                          args.fmt, args.concurrency, args.reviewer,
-                                         args.fail_on_blocked),
+                                         args.fail_on_blocked, args.setup, args.show_output),
     }
     try:
         exit_code = asyncio.run(commands[args.command]())

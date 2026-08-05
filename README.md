@@ -141,9 +141,12 @@ Twenty scenario inputs across the five agents, plus an execution validation agen
 routes each one to its agent, runs it for real, reviews any approval gate it hits, and
 asserts the expected behaviour.
 
+One command does everything: it prepares the database and seed data if they are missing,
+then runs the inputs one at a time and prints each agent's result as it arrives.
+
 ```bash
 cd backend
-.venv/bin/python -m app.cli validate                        # all 20
+.venv/bin/python -m app.cli validate                        # all 20, prepares if needed
 .venv/bin/python -m app.cli validate --agent aml_investigation
 .venv/bin/python -m app.cli validate --tag hitl --output report.md
 .venv/bin/python -m app.cli validate --fail-on-blocked      # strict CI mode

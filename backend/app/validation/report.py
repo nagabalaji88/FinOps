@@ -121,6 +121,84 @@ def to_markdown(report: ValidationReport) -> str:
     return "\n".join(lines)
 
 
+LABEL_WIDTH = 10
+
+
+def _field(label: str, text: str, width: int = 96) -> list[str]:
+    """A labelled, wrapped block: the label on the first line, continuation aligned."""
+    import textwrap
+
+    indent = " " * LABEL_WIDTH
+    body: list[str] = []
+    for paragraph in str(text).strip().splitlines():
+        if paragraph.strip():
+            body.extend(textwrap.wrap(paragraph.strip(), width=width - LABEL_WIDTH) or [""])
+    if not body:
+        return []
+    return [f"  {label:<{LABEL_WIDTH - 2}}{body[0]}"] + [indent + line for line in body[1:]]
+
+
+def format_live(
+    index: int,
+    total: int,
+    result: ScenarioResult,
+    *,
+    show_output: bool = True,
+    max_output_lines: int = 12,
+    width: int = 96,
+) -> str:
+    """Readable block printed as each scenario finishes, so a run is watchable."""
+    scenario = result.scenario
+    observed = result.observed
+    head = f"[{index:>2}/{total}] {scenario.id:<7} {scenario.agent_key:<21} {scenario.title}"
+    lines = ["", head, "-" * min(len(head), width)]
+
+    payload = json.dumps(scenario.payload, default=str)
+    lines += _field("input", payload if len(payload) <= 400 else payload[:397] + "...", width)
+
+    facts = [VERDICT_MARK[result.verdict], f"{result.duration_ms / 1000:.1f}s"]
+    if observed:
+        facts += [
+            f"${observed.cost_usd:.5f}",
+            f"{len(observed.tool_invocations)} tools",
+            f"{observed.span_count} spans",
+        ]
+    if result.checks:
+        passed = sum(1 for c in result.checks if c.outcome == "pass")
+        facts.append(f"{passed}/{len(result.checks)} checks")
+    lines += _field("result", " \u00b7 ".join(facts), width)
+
+    if observed and observed.tool_invocations:
+        lines += _field(
+            "tools",
+            ", ".join(f"{n}{'' if ok else ' (failed)'}" for n, ok in observed.tool_invocations),
+            width,
+        )
+
+    if observed:
+        for approval in observed.approvals:
+            tool = (approval.get("payload") or {}).get("tool") or approval.get("node")
+            lines += _field(
+                "approval",
+                f"{tool} -> {approval['status']} by {approval.get('reviewer_email') or 'unknown'}",
+                width,
+            )
+
+    if result.verdict == "failed":
+        for check in result.failed_checks:
+            lines += _field("FAILED", f"{check.name}: {check.detail}", width)
+    elif result.verdict in {"blocked", "error"} and result.note:
+        lines += _field("reason", result.note, width)
+
+    if show_output and observed and observed.final_response:
+        body = _field("output", observed.final_response, width)
+        lines += body[:max_output_lines]
+        if len(body) > max_output_lines:
+            lines.append(" " * LABEL_WIDTH
+                         + f"... ({len(observed.final_response)} characters in total)")
+    return "\n".join(lines)
+
+
 def to_console(report: ValidationReport) -> str:
     """Compact terminal summary."""
     lines = []

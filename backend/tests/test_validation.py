@@ -27,6 +27,8 @@ from app.validation import (
     to_json,
     to_markdown,
 )
+from app.validation.report import format_live
+from app.validation.runner import prepare_environment
 from tests.conftest import TEST_MODEL
 
 IMPLEMENTED = {
@@ -209,6 +211,28 @@ class TestAssertionEngine:
         assert not any(c.name == "must_match" for c in checks)
 
 
+class TestEnvironmentPreparation:
+    """`validate` must be runnable as one command against an unprepared deployment."""
+
+    async def test_preparation_is_idempotent(self):
+        first = await prepare_environment(list(SCENARIOS))
+        assert first["prepared"] is True
+        actions = {step["step"]: step["action"] for step in first["steps"]}
+        assert actions["schema"] == "ensured"
+        # The suite fixture already seeded, so preparation must recognise that.
+        assert actions["platform_seed"] == "already_present"
+        assert actions["sample_banking"] == "already_present"
+
+        second = await prepare_environment(list(SCENARIOS))
+        assert {s["step"]: s["action"] for s in second["steps"]} == actions
+
+    async def test_sample_data_is_skipped_when_no_scenario_needs_it(self):
+        knowledge_only = [s for s in SCENARIOS if not s.requires_sample_data]
+        assert knowledge_only, "expected scenarios that run without the sample dataset"
+        result = await prepare_environment(knowledge_only)
+        assert "sample_banking" not in {step["step"] for step in result["steps"]}
+
+
 class TestRunnerEndToEnd:
     """Drives real executions through the engine using the suite's scripted provider."""
 
@@ -327,6 +351,56 @@ class TestRunnerEndToEnd:
         assert "Agent conformance report" in to_markdown(report)
         assert '"summary"' in to_json(report)
         assert "KA-03" in to_console(report)
+
+    async def test_results_are_returned_in_input_order(self, _register_scripted_model):
+        """Sequential mode must report scenarios in the order they were supplied."""
+        requested = [by_id("KA-03"), by_id("KA-01"), by_id("KA-02")]
+        report = await ValidationRunner().run(requested)
+        assert [r.scenario.id for r in report.results] == ["KA-03", "KA-01", "KA-02"]
+
+    async def test_live_output_shows_the_input_and_the_agent_response(
+        self, _register_scripted_model
+    ):
+        """The one-stop run must print what went in and what came back, per input."""
+        provider = _register_scripted_model
+        provider.queue_text(
+            '{"objective":"Explain severity","steps":[],"required_tools":'
+            '["search_knowledge_base"],"needs_knowledge_search":true,"risk_level":"low"}'
+        )
+        provider.queue_tool_call("search_knowledge_base", {"query": "incident severity"})
+        provider.queue_text(
+            "A Sev-1 is a complete loss of a customer-facing service and may be declared "
+            "by the on-call incident commander or any engineer who believes the criteria "
+            "are met [1]."
+        )
+        await self._point_agent_at_scripted_model("knowledge_assistant")
+
+        result = await ValidationRunner().run_scenario(by_id("KA-01"))
+        block = format_live(1, 1, result)
+
+        assert "[ 1/1] KA-01" in block
+        assert "knowledge_assistant" in block
+        assert "input" in block and "incident severity classification" in block
+        assert "PASS" in block
+        assert "tools" in block and "search_knowledge_base" in block
+        assert "output" in block and "incident commander" in block
+        assert "checks" in block
+
+    async def test_live_output_names_the_failing_check(self, _register_scripted_model):
+        provider = _register_scripted_model
+        provider.queue_text(
+            '{"objective":"Report","steps":[],"required_tools":[],'
+            '"needs_knowledge_search":true,"risk_level":"low"}'
+        )
+        provider.queue_text("Our net interest margin was 3.8% in the third quarter of 2025.")
+        await self._point_agent_at_scripted_model("knowledge_assistant")
+
+        result = await ValidationRunner().run_scenario(by_id("KA-04"))
+        block = format_live(3, 20, result)
+
+        assert "[ 3/20] KA-04" in block
+        assert "FAIL" in block
+        assert "FAILED" in block  # the specific check is named
 
     async def test_unknown_agent_is_reported_as_an_error_not_a_crash(self):
         import dataclasses

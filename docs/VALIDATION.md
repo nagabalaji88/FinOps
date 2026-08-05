@@ -7,15 +7,40 @@ when a run suspends for approval, and asserts the expected behaviour.
 It is a release gate, not a demo. The verdict is reproducible and the exit code is
 meaningful.
 
+**One command is enough.** `validate` prepares whatever is missing — schema, platform seed
+(identities, agent registry, knowledge corpus, watchlists) and the sample banking dataset —
+then runs the inputs **one at a time in order**, printing each agent's result as it
+arrives. Every preparation step is idempotent, so on an already-prepared deployment it
+costs one query and moves on. Use `--no-setup` to skip preparation entirely.
+
 ```bash
 cd backend
-python -m app.cli validate                                  # all 20
+python -m app.cli validate                                  # all 20, prepares if needed
 python -m app.cli validate --agent aml_investigation        # one agent
 python -m app.cli validate --scenario KA-01 --scenario CS-04
 python -m app.cli validate --tag hitl                       # governance paths only
 python -m app.cli validate --output report.md --format markdown
 python -m app.cli validate --fail-on-blocked                # strict CI mode
+python -m app.cli validate --no-setup                       # assume prepared
+python -m app.cli validate --quiet                          # verdicts only
 ```
+
+Each input produces a block like this as it completes:
+
+```
+[ 1/20] CS-01   customer_service      Authenticated balance inquiry
+------------------------------------------------------------------
+  input   {"query": "What is the balance on my savings account right now?",
+          "identifier": "CUS-100001", "pin": "1000"}
+  result  PASS · 4.2s · $0.00312 · 2 tools · 12 spans · 11/11 checks
+  tools   authenticate_customer, get_account_balance
+  output  Your savings account ****4821 has an available balance of INR 1,204,338.20
+          as of 05 August 2026. There are no holds on the account.
+```
+
+A failure names the check that broke; a blocked scenario names the reason. Runs are
+sequential by default so the output reads top to bottom; `--concurrency` trades that
+readability for speed.
 
 | Exit code | Meaning |
 |---|---|
@@ -88,18 +113,21 @@ than just marking the scenario red.
 
 ## How the validator drives a run
 
-1. **Preflight** — confirms the agents are registered and active, a provider is
+1. **Prepare** — creates the schema, seeds the platform and loads the sample banking
+   dataset if any of them are missing. Idempotent, and skippable with `--no-setup`.
+2. **Preflight** — confirms the agents are registered and active, a provider is
    configured, the sample dataset is present for scenarios that need it, and the reviewer
    identity exists. Warnings are printed before anything executes.
-2. **Submit** — routes the scenario input to its agent through the same engine path the
+3. **Submit** — routes the scenario input to its agent through the same engine path the
    API uses, as the `operator@finops.local` identity, with trigger `validation`.
-3. **Review** — when a run suspends on an approval gate, the validator finds the pending
+4. **Review** — when a run suspends on an approval gate, the validator finds the pending
    request, records the scenario's decision as `approver@finops.local` with a comment
    naming the scenario, and resumes the execution from its checkpoint. Both approval and
    rejection paths are exercised by the suite.
-4. **Observe** — reads back the execution, its spans (tool invocations come from the
+5. **Observe** — reads back the execution, its spans (tool invocations come from the
    trace, so failed calls still count as invoked), its approvals and its structured output.
-5. **Assert** — evaluates every expectation and returns pass, fail, blocked or error.
+6. **Assert** — evaluates every expectation, records a verdict of pass, fail, blocked or
+   error, prints the result block, and moves to the next input.
 
 ## Verdicts
 
