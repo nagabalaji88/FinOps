@@ -79,11 +79,106 @@ class TestCatalogueApi:
 
     async def test_dashboards_respond(self, client: AsyncClient, auth: dict):
         for path in ["/api/v1/dashboard/overview", "/api/v1/dashboard/ai-usage",
-                     "/api/v1/dashboard/knowledge", "/api/v1/costs/summary",
+                     "/api/v1/dashboard/knowledge", "/api/v1/dashboard/geography",
+                     "/api/v1/costs/summary",
                      "/api/v1/platform-metrics", "/api/v1/security/overview",
                      "/api/v1/services", "/api/v1/tools", "/api/v1/agents/graph"]:
             response = await client.get(path, headers=auth)
             assert response.status_code == 200, f"{path} -> {response.text[:200]}"
+
+
+class TestGeographyDashboard:
+    """The geography screen must aggregate the real ledger, not a fixed map."""
+
+    async def test_countries_come_from_the_transaction_ledger(
+        self, client: AsyncClient, auth: dict, session):
+        from sqlalchemy import func, select
+
+        from app.db.models.banking import Transaction
+
+        response = await client.get("/api/v1/dashboard/geography", headers=auth,
+                                    params={"days": 730})
+        assert response.status_code == 200, response.text
+        body = response.json()
+
+        ledger = dict((await session.execute(
+            select(Transaction.country, func.count(Transaction.id)).group_by(Transaction.country)
+        )).all())
+        reported = {row["code"]: row["transactions"] for row in body["countries"]}
+        assert reported, "the seeded ledger has transactions, so countries must be reported"
+        for code, count in reported.items():
+            assert ledger[code] == count
+
+        # Nothing is invented: every reported country was actually transacted with.
+        assert set(reported) <= set(ledger)
+        assert body["unmapped"] == [] or all(code not in reported for code in body["unmapped"])
+
+    async def test_totals_reconcile_and_shares_are_consistent(
+        self, client: AsyncClient, auth: dict):
+        response = await client.get("/api/v1/dashboard/geography", headers=auth,
+                                    params={"days": 730})
+        body = response.json()
+        summary = body["summary"]
+
+        assert summary["transactions"] == sum(c["transactions"] for c in body["countries"])
+        assert summary["total_value"] == pytest.approx(
+            sum(c["total_value"] for c in body["countries"]), rel=1e-6)
+        assert sum(c["share_pct"] for c in body["countries"]) == pytest.approx(100.0, abs=0.5)
+
+        domestic = [c for c in body["countries"] if c["domestic"]]
+        assert len(domestic) == 1 and domestic[0]["code"] == summary["domestic_country"]
+        cross_border = sum(c["total_value"] for c in body["countries"] if not c["domestic"])
+        assert summary["cross_border_value"] == pytest.approx(cross_border, rel=1e-6)
+
+        # Inbound and outbound partition the value of every jurisdiction.
+        for country in body["countries"]:
+            assert country["inbound_value"] + country["outbound_value"] == pytest.approx(
+                country["total_value"], rel=1e-6)
+
+    async def test_high_risk_jurisdictions_follow_the_aml_rule_set(
+        self, client: AsyncClient, auth: dict):
+        from app.tools.aml import HIGH_RISK_COUNTRIES
+
+        response = await client.get("/api/v1/dashboard/geography", headers=auth,
+                                    params={"days": 730})
+        body = response.json()
+        for country in body["countries"]:
+            expected_high = country["code"] in HIGH_RISK_COUNTRIES
+            assert (country["risk_level"] == "high") is expected_high
+        high_risk_value = sum(
+            c["total_value"] for c in body["countries"] if c["code"] in HIGH_RISK_COUNTRIES)
+        assert body["summary"]["high_risk_value"] == pytest.approx(high_risk_value, rel=1e-6)
+
+    async def test_every_plotted_place_has_real_coordinates(
+        self, client: AsyncClient, auth: dict):
+        from app.seed.geo_reference import CITIES, COUNTRIES
+
+        response = await client.get("/api/v1/dashboard/geography", headers=auth,
+                                    params={"days": 730})
+        body = response.json()
+        for country in body["countries"]:
+            place = COUNTRIES[country["code"]]
+            assert (country["latitude"], country["longitude"]) == (place.latitude, place.longitude)
+        for city in body["cities"]:
+            place = CITIES[city["name"]]
+            assert (city["latitude"], city["longitude"]) == (place.latitude, place.longitude)
+        for corridor in body["corridors"]:
+            assert -90 <= corridor["from_latitude"] <= 90
+            assert -180 <= corridor["to_longitude"] <= 180
+            assert corridor["to_code"] != body["summary"]["domestic_country"]
+
+    async def test_window_narrows_the_result(self, client: AsyncClient, auth: dict):
+        wide = (await client.get("/api/v1/dashboard/geography", headers=auth,
+                                 params={"days": 730})).json()
+        narrow = (await client.get("/api/v1/dashboard/geography", headers=auth,
+                                   params={"days": 1})).json()
+        assert narrow["summary"]["transactions"] <= wide["summary"]["transactions"]
+        assert narrow["window_days"] == 1
+        assert len(narrow["trend"]) <= len(wide["trend"])
+
+    async def test_requires_metric_read(self, client: AsyncClient):
+        response = await client.get("/api/v1/dashboard/geography")
+        assert response.status_code == 401
 
     async def test_lifecycle_transitions(self, client: AsyncClient, auth: dict):
         paused = await client.post("/api/v1/agents/customer_service/lifecycle", headers=auth,

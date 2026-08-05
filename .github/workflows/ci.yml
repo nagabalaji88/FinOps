@@ -226,7 +226,7 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"email":"admin@finops.local","password":"ChangeMe!2026"}' \
             | python -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
-          for path in dashboard/overview agents tools services costs/summary approvals; do
+          for path in dashboard/overview dashboard/geography agents tools services costs/summary approvals; do
             curl -fsS -H "Authorization: Bearer $TOKEN" \
               "http://127.0.0.1:8000/api/v1/$path" > /dev/null
           done

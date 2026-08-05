@@ -664,3 +664,326 @@ async def knowledge_dashboard(session: SessionDep, principal: PrincipalDep) -> d
             "avg_results": round(float(search[2] or 0), 2),
         },
     }
+
+
+# --- geography ---------------------------------------------------------------
+def _risk_level(code: str, *, watchlist: int) -> str:
+    """Jurisdiction risk, derived from the AML rule set and the loaded watchlists."""
+    from app.tools.aml import HIGH_RISK_COUNTRIES
+
+    if code in HIGH_RISK_COUNTRIES:
+        return "high"
+    if watchlist:
+        return "elevated"
+    return "standard"
+
+
+@dashboard_router.get("/geography")
+async def geography_dashboard(session: SessionDep, principal: PrincipalDep,
+                              days: int = Query(default=90, ge=1, le=730)) -> dict[str, Any]:
+    """Where the book actually sits: transaction corridors, customer locations and
+    jurisdiction risk, aggregated from the banking ledger over the requested window."""
+    principal.require(Permission.METRIC_READ)
+    from app.db.models.banking import (
+        AmlAlert,
+        Customer,
+        SanctionsEntry,
+        Security,
+        Transaction,
+    )
+    from app.seed import geo_reference as geo
+
+    now = datetime.now(UTC)
+    since = now - timedelta(days=days)
+    amount = func.abs(Transaction.amount)
+
+    country_rows = (
+        await session.execute(
+            select(
+                Transaction.country,
+                func.count(Transaction.id),
+                func.sum(amount),
+                func.sum(case((Transaction.direction == "credit", amount), else_=0.0)),
+                func.sum(case((Transaction.direction == "debit", amount), else_=0.0)),
+                func.sum(case((Transaction.is_flagged.is_(True), 1), else_=0)),
+                func.count(func.distinct(Transaction.customer_id)),
+            )
+            .where(Transaction.booked_at >= since)
+            .group_by(Transaction.country)
+        )
+    ).all()
+
+    watchlist_rows = (
+        await session.execute(
+            select(SanctionsEntry.nationality, func.count(SanctionsEntry.id),
+                   func.sum(case((SanctionsEntry.is_pep.is_(True), 1), else_=0)))
+            .where(SanctionsEntry.nationality.is_not(None))
+            .group_by(SanctionsEntry.nationality)
+        )
+    ).all()
+    watchlist: dict[str, dict[str, int]] = {}
+    for nationality, total, pep in watchlist_rows:
+        code = geo.resolve(nationality)
+        if code is None:
+            continue
+        bucket = watchlist.setdefault(code, {"entries": 0, "peps": 0})
+        bucket["entries"] += int(total or 0)
+        bucket["peps"] += int(pep or 0)
+
+    security_rows = (
+        await session.execute(
+            select(Security.country, func.count(Security.id)).group_by(Security.country)
+        )
+    ).all()
+    securities = {
+        code: int(total)
+        for code, total in ((geo.resolve(raw), value) for raw, value in security_rows)
+        if code
+    }
+
+    customer_country_rows = (
+        await session.execute(
+            select(Customer.nationality, func.count(Customer.id))
+            .group_by(Customer.nationality)
+        )
+    ).all()
+    customers_by_country: dict[str, int] = {}
+    for nationality, total in customer_country_rows:
+        code = geo.resolve(nationality)
+        if code:
+            customers_by_country[code] = customers_by_country.get(code, 0) + int(total)
+
+    total_value = sum(float(row[2] or 0.0) for row in country_rows)
+    total_transactions = sum(int(row[1] or 0) for row in country_rows)
+
+    countries: list[dict[str, Any]] = []
+    unmapped: list[str] = []
+    cross_border_value = cross_border_transactions = 0.0
+    high_risk_value = high_risk_transactions = 0.0
+    for code, count, value, inbound, outbound, flagged, customer_count in country_rows:
+        resolved = geo.resolve(code)
+        place = geo.country(resolved)
+        if place is None or resolved is None:
+            unmapped.append(str(code))
+            continue
+        marks = watchlist.get(resolved, {"entries": 0, "peps": 0})
+        risk = _risk_level(resolved, watchlist=marks["entries"])
+        value = float(value or 0.0)
+        count = int(count or 0)
+        if resolved != geo.DOMESTIC_COUNTRY:
+            cross_border_value += value
+            cross_border_transactions += count
+        if risk == "high":
+            high_risk_value += value
+            high_risk_transactions += count
+        countries.append({
+            "code": resolved,
+            "name": place.name,
+            "latitude": place.latitude,
+            "longitude": place.longitude,
+            "region": place.region,
+            "domestic": resolved == geo.DOMESTIC_COUNTRY,
+            "risk_level": risk,
+            "transactions": count,
+            "total_value": round(value, 2),
+            "inbound_value": round(float(inbound or 0.0), 2),
+            "outbound_value": round(float(outbound or 0.0), 2),
+            "flagged": int(flagged or 0),
+            "counterparty_customers": int(customer_count or 0),
+            "resident_customers": customers_by_country.get(resolved, 0),
+            "securities": securities.get(resolved, 0),
+            "watchlist_entries": marks["entries"],
+            "watchlist_peps": marks["peps"],
+            "share_pct": round(value / total_value * 100, 2) if total_value else 0.0,
+        })
+    countries.sort(key=lambda item: item["total_value"], reverse=True)
+
+    # Cities come from the customer master; the figures are that city's customers' ledger.
+    city_rows = (
+        await session.execute(
+            select(
+                Customer.address_city,
+                func.count(func.distinct(Customer.id)),
+                func.count(Transaction.id),
+                func.sum(amount),
+                func.sum(case((Transaction.country != geo.DOMESTIC_COUNTRY, amount), else_=0.0)),
+                func.sum(case((Transaction.is_flagged.is_(True), 1), else_=0)),
+            )
+            .select_from(Customer)
+            .outerjoin(
+                Transaction,
+                (Transaction.customer_id == Customer.id) & (Transaction.booked_at >= since),
+            )
+            .where(Customer.address_city.is_not(None))
+            .group_by(Customer.address_city)
+        )
+    ).all()
+    high_risk_customers = dict(
+        (
+            await session.execute(
+                select(Customer.address_city, func.count(Customer.id))
+                .where(Customer.address_city.is_not(None), Customer.risk_rating == "high")
+                .group_by(Customer.address_city)
+            )
+        ).all()
+    )
+    alerts_by_city = dict(
+        (
+            await session.execute(
+                select(Customer.address_city, func.count(AmlAlert.id))
+                .select_from(AmlAlert)
+                .join(Customer, Customer.id == AmlAlert.customer_id)
+                .where(AmlAlert.detected_at >= since, Customer.address_city.is_not(None))
+                .group_by(Customer.address_city)
+            )
+        ).all()
+    )
+
+    cities: list[dict[str, Any]] = []
+    for name, customer_count, txn_count, value, cross_value, flagged in city_rows:
+        place = geo.city(name)
+        if place is None:
+            unmapped.append(str(name))
+            continue
+        value = float(value or 0.0)
+        cities.append({
+            "name": place.name,
+            "latitude": place.latitude,
+            "longitude": place.longitude,
+            "country": place.region,
+            "customers": int(customer_count or 0),
+            "high_risk_customers": int(high_risk_customers.get(name, 0)),
+            "transactions": int(txn_count or 0),
+            "total_value": round(value, 2),
+            "cross_border_value": round(float(cross_value or 0.0), 2),
+            "flagged": int(flagged or 0),
+            "alerts": int(alerts_by_city.get(name, 0)),
+            "share_pct": round(value / total_value * 100, 2) if total_value else 0.0,
+        })
+    cities.sort(key=lambda item: item["total_value"], reverse=True)
+
+    # Corridors: the customer's home city to the counterparty jurisdiction.
+    corridor_rows = (
+        await session.execute(
+            select(
+                Customer.address_city,
+                Transaction.country,
+                func.count(Transaction.id),
+                func.sum(amount),
+                func.sum(case((Transaction.direction == "debit", amount), else_=0.0)),
+                func.sum(case((Transaction.is_flagged.is_(True), 1), else_=0)),
+            )
+            .select_from(Transaction)
+            .join(Customer, Customer.id == Transaction.customer_id)
+            .where(
+                Transaction.booked_at >= since,
+                Transaction.country != geo.DOMESTIC_COUNTRY,
+                Customer.address_city.is_not(None),
+            )
+            .group_by(Customer.address_city, Transaction.country)
+        )
+    ).all()
+    corridors: list[dict[str, Any]] = []
+    for city_name, code, count, value, outbound, flagged in corridor_rows:
+        origin = geo.city(city_name)
+        resolved = geo.resolve(code)
+        destination = geo.country(resolved)
+        if origin is None or destination is None or resolved is None:
+            continue
+        value = float(value or 0.0)
+        outbound = float(outbound or 0.0)
+        corridors.append({
+            "from_city": origin.name,
+            "from_latitude": origin.latitude,
+            "from_longitude": origin.longitude,
+            "to_code": resolved,
+            "to_country": destination.name,
+            "to_latitude": destination.latitude,
+            "to_longitude": destination.longitude,
+            "risk_level": _risk_level(
+                resolved, watchlist=watchlist.get(resolved, {}).get("entries", 0)),
+            "transactions": int(count or 0),
+            "total_value": round(value, 2),
+            "outbound_value": round(outbound, 2),
+            "inbound_value": round(value - outbound, 2),
+            "flagged": int(flagged or 0),
+        })
+    corridors.sort(key=lambda item: item["total_value"], reverse=True)
+
+    # Daily split of domestic against cross-border value.
+    trend_rows = (
+        await session.execute(
+            select(Transaction.booked_at, Transaction.country, amount)
+            .where(Transaction.booked_at >= since)
+        )
+    ).all()
+    buckets: dict[str, dict[str, Any]] = {}
+    for booked_at, code, value in trend_rows:
+        key = booked_at.date().isoformat()
+        bucket = buckets.setdefault(
+            key, {"date": key, "transactions": 0, "domestic_value": 0.0,
+                  "cross_border_value": 0.0, "high_risk_value": 0.0})
+        bucket["transactions"] += 1
+        resolved = geo.resolve(code) or ""
+        value = float(value or 0.0)
+        if resolved == geo.DOMESTIC_COUNTRY:
+            bucket["domestic_value"] += value
+        else:
+            bucket["cross_border_value"] += value
+        if _risk_level(resolved, watchlist=0) == "high":
+            bucket["high_risk_value"] += value
+    trend = [
+        {**bucket,
+         "domestic_value": round(bucket["domestic_value"], 2),
+         "cross_border_value": round(bucket["cross_border_value"], 2),
+         "high_risk_value": round(bucket["high_risk_value"], 2)}
+        for bucket in sorted(buckets.values(), key=lambda b: b["date"])
+    ]
+
+    alerts = int(
+        (await session.execute(
+            select(func.count(AmlAlert.id)).where(AmlAlert.detected_at >= since)
+        )).scalar_one()
+    )
+    flagged_total = int(
+        (await session.execute(
+            select(func.count(Transaction.id))
+            .where(Transaction.booked_at >= since, Transaction.is_flagged.is_(True))
+        )).scalar_one()
+    )
+    currency = (
+        await session.execute(
+            select(Transaction.currency).where(Transaction.booked_at >= since).limit(1)
+        )
+    ).scalar_one_or_none()
+
+    return {
+        "generated_at": now.isoformat(),
+        "window_days": days,
+        "summary": {
+            "countries": len(countries),
+            "cities": len(cities),
+            "corridors": len(corridors),
+            "customers": int(
+                (await session.execute(select(func.count(Customer.id)))).scalar_one()),
+            "transactions": total_transactions,
+            "total_value": round(total_value, 2),
+            "currency": currency or "INR",
+            "domestic_country": geo.DOMESTIC_COUNTRY,
+            "cross_border_transactions": int(cross_border_transactions),
+            "cross_border_value": round(cross_border_value, 2),
+            "cross_border_share_pct": round(cross_border_value / total_value * 100, 2)
+            if total_value else 0.0,
+            "high_risk_transactions": int(high_risk_transactions),
+            "high_risk_value": round(high_risk_value, 2),
+            "high_risk_share_pct": round(high_risk_value / total_value * 100, 2)
+            if total_value else 0.0,
+            "flagged_transactions": flagged_total,
+            "alerts": alerts,
+        },
+        "countries": countries,
+        "cities": cities,
+        "corridors": corridors[:40],
+        "trend": trend,
+        "unmapped": sorted(set(unmapped)),
+    }

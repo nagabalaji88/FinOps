@@ -26,6 +26,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { api, type Overview as OverviewData } from '@/lib/api'
 import {
+  AnimatedNumber,
   Badge,
   Card,
   CardHeader,
@@ -152,7 +153,7 @@ export default function Overview() {
             <Card interactive>
               <Stat
                 label="Total agents"
-                value={formatNumber(data.agents.total)}
+                value={<AnimatedNumber value={data.agents.total} format={(v) => formatNumber(Math.round(v))} />}
                 hint={`${data.agents.implemented} implemented · ${data.agents.coming_soon} on roadmap`}
                 icon={<CpuChipIcon className="h-4 w-4" />}
               />
@@ -160,7 +161,7 @@ export default function Overview() {
             <Card interactive>
               <Stat
                 label="Executions (24h)"
-                value={formatCompact(data.executions.last_24h)}
+                value={<AnimatedNumber value={data.executions.last_24h} format={(v) => formatCompact(Math.round(v))} />}
                 hint={`${formatNumber(data.executions.total_all_time)} all time`}
                 icon={<BoltIcon className="h-4 w-4" />}
               />
@@ -168,7 +169,7 @@ export default function Overview() {
             <Card interactive>
               <Stat
                 label="Success rate"
-                value={formatPercent(data.executions.success_rate_pct)}
+                value={<AnimatedNumber value={data.executions.success_rate_pct} format={(v) => formatPercent(v)} />}
                 tone={data.executions.success_rate_pct >= 95 ? 'ok' : data.executions.success_rate_pct >= 85 ? 'warn' : 'err'}
                 hint={`${data.executions.succeeded_24h} succeeded · ${data.executions.failed_24h} failed`}
                 icon={<CheckCircleIcon className="h-4 w-4" />}
@@ -177,7 +178,7 @@ export default function Overview() {
             <Card interactive>
               <Stat
                 label="Average latency"
-                value={formatDuration(data.executions.avg_latency_ms)}
+                value={<AnimatedNumber value={data.executions.avg_latency_ms} format={(v) => formatDuration(v)} />}
                 hint={`Avg cost ${formatCurrency(data.executions.avg_cost_usd, 4)} per run`}
                 icon={<ClockIcon className="h-4 w-4" />}
               />
@@ -193,8 +194,12 @@ export default function Overview() {
               { label: 'Paused', value: data.agents.paused, tone: 'warn' as const },
               { label: 'Failed 24h', value: data.agents.failed_24h, tone: 'err' as const },
               { label: 'Approvals', value: data.approvals.pending, tone: 'warn' as const },
-            ].map((item) => (
-              <Card key={item.label} className="px-4 py-3.5">
+            ].map((item, index) => (
+              <Card
+                key={item.label}
+                className="px-4 py-3.5"
+                transition={{ delay: index * 0.05, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+              >
                 <p className="metric-label">{item.label}</p>
                 <p
                   className={`mt-1.5 text-xl font-semibold tabular-nums ${
@@ -205,7 +210,7 @@ export default function Overview() {
                         : 'text-ink'
                   }`}
                 >
-                  {formatNumber(item.value)}
+                  <AnimatedNumber value={item.value} format={(v) => formatNumber(Math.round(v))} />
                 </p>
               </Card>
             ))}

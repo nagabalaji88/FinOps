@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect } from 'react'
 import { Command } from 'cmdk'
@@ -14,6 +14,7 @@ import {
   CommandLineIcon,
   CpuChipIcon,
   DocumentTextIcon,
+  GlobeAltIcon,
   MagnifyingGlassIcon,
   MoonIcon,
   ShieldCheckIcon,
@@ -30,6 +31,7 @@ import { Badge, StatusDot, Tooltip } from '@/components/ui'
 const NAV = [
   { to: '/', label: 'Overview', icon: Squares2X2Icon, permission: 'metric:read', end: true },
   { to: '/agents', label: 'Agents', icon: CpuChipIcon, permission: 'agent:read' },
+  { to: '/geography', label: 'Geography', icon: GlobeAltIcon, permission: 'metric:read' },
   { to: '/executions', label: 'Executions', icon: CommandLineIcon, permission: 'execution:read' },
   { to: '/approvals', label: 'Approvals', icon: BellAlertIcon, permission: 'approval:read', badge: 'approvals' },
   { to: '/costs', label: 'Cost', icon: BanknotesIcon, permission: 'cost:read' },
@@ -47,6 +49,7 @@ export function AppShell() {
   const { user, logout, can } = useAuth()
   const { sidebarCollapsed, toggleSidebar, theme, toggleTheme, commandOpen, setCommandOpen } = useUi()
   const navigate = useNavigate()
+  const location = useLocation()
   const { toasts, dismiss } = useToasts()
 
   const { data: overview } = useQuery({
@@ -107,19 +110,28 @@ export function AppShell() {
               end={item.end}
               className={({ isActive }) =>
                 cn(
-                  'group flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all duration-200',
-                  isActive
-                    ? 'bg-accent-soft font-medium text-ink shadow-inset'
-                    : 'text-ink-muted hover:bg-accent-soft/60 hover:text-ink',
+                  'group relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors duration-200',
+                  isActive ? 'font-medium text-ink' : 'text-ink-muted hover:bg-accent-soft/60 hover:text-ink',
                 )
               }
             >
-              <item.icon className="h-[18px] w-[18px] shrink-0" />
-              {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
-              {!sidebarCollapsed && item.badge === 'approvals' && pendingApprovals > 0 && (
-                <Badge tone="warn" className="ml-auto">
-                  {pendingApprovals}
-                </Badge>
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <motion.span
+                      layoutId="nav-active"
+                      className="absolute inset-0 rounded-xl bg-accent-soft shadow-inset"
+                      transition={{ type: 'spring', stiffness: 420, damping: 36 }}
+                    />
+                  )}
+                  <item.icon className="relative h-[18px] w-[18px] shrink-0" />
+                  {!sidebarCollapsed && <span className="relative truncate">{item.label}</span>}
+                  {!sidebarCollapsed && item.badge === 'approvals' && pendingApprovals > 0 && (
+                    <Badge tone="warn" className="relative ml-auto">
+                      {pendingApprovals}
+                    </Badge>
+                  )}
+                </>
               )}
             </NavLink>
           ))}
@@ -198,7 +210,18 @@ export function AppShell() {
 
         <main id="main" className="flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
           <div className="mx-auto w-full max-w-[1600px]">
-            <Outlet />
+            {/* Each route fades up on entry so a navigation reads as a change of place. */}
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={location.pathname}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <Outlet />
+              </motion.div>
+            </AnimatePresence>
           </div>
         </main>
       </div>

@@ -1,10 +1,10 @@
 /** Minimal glass design-system primitives shared across the console. */
-import { motion, type HTMLMotionProps } from 'framer-motion'
+import { motion, useReducedMotion, useSpring, useTransform, type HTMLMotionProps } from 'framer-motion'
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import * as TabsPrimitive from '@radix-ui/react-tabs'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { XMarkIcon } from '@heroicons/react/24/outline'
-import { type ReactNode, forwardRef } from 'react'
+import { type ReactNode, forwardRef, useEffect } from 'react'
 import { cn, statusTone } from '@/lib/utils'
 
 /* ------------------------------------------------------------------ Card */
@@ -404,5 +404,88 @@ export function PageHeader({
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </header>
+  )
+}
+
+/* ------------------------------------------------------- Motion helpers */
+/**
+ * Count a number up when it first appears and whenever it changes, so a refreshed
+ * figure is visibly a new figure. Falls back to the plain value under reduced motion.
+ */
+export function AnimatedNumber({
+  value,
+  format,
+  duration = 0.9,
+  className,
+}: {
+  value: number
+  format?: (value: number) => string
+  duration?: number
+  className?: string
+}) {
+  const reduceMotion = useReducedMotion()
+  const render = format ?? ((next: number) => next.toLocaleString('en-US'))
+  const spring = useSpring(reduceMotion ? value : 0, {
+    duration: duration * 1000,
+    bounce: 0,
+  })
+  const text = useTransform(spring, (latest) => render(latest))
+
+  useEffect(() => {
+    if (reduceMotion) spring.jump(value)
+    else spring.set(value)
+  }, [value, reduceMotion, spring])
+
+  if (reduceMotion) return <span className={className}>{render(value)}</span>
+  return <motion.span className={className}>{text}</motion.span>
+}
+
+/** Staggered entrance for a list or grid. Children animate in sequence. */
+export function Stagger({
+  children,
+  delay = 0,
+  gap = 0.05,
+  className,
+}: {
+  children: ReactNode
+  delay?: number
+  gap?: number
+  className?: string
+}) {
+  return (
+    <motion.div
+      className={className}
+      initial="hidden"
+      animate="visible"
+      variants={{
+        hidden: {},
+        visible: { transition: { delayChildren: delay, staggerChildren: gap } },
+      }}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
+/** A single item inside a `Stagger`, or a standalone fade-up on mount. */
+export function Reveal({
+  children,
+  className,
+  y = 10,
+  ...props
+}: HTMLMotionProps<'div'> & { y?: number }) {
+  return (
+    <motion.div
+      className={className}
+      variants={{
+        hidden: { opacity: 0, y },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] } },
+      }}
+      initial="hidden"
+      animate="visible"
+      {...props}
+    >
+      {children}
+    </motion.div>
   )
 }

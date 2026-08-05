@@ -82,7 +82,27 @@ is supplied.
 `/security/overview`, `/security/audit`, `/security/secrets`, `/security/feature-flags/{key}` ·
 `/playground/run`, `/playground/models`, `/playground/estimate` ·
 `/evaluations`, `/evaluations/{execution_id}/run`, `/evaluations/{execution_id}/feedback` ·
-`/dashboard/overview`, `/dashboard/ai-usage`, `/dashboard/timeseries`, `/dashboard/knowledge`
+`/dashboard/overview`, `/dashboard/ai-usage`, `/dashboard/timeseries`, `/dashboard/knowledge`,
+`/dashboard/geography`
+
+### `GET /dashboard/geography` (`metric:read`)
+
+Location view of the book, aggregated from the banking ledger. `?days=` (1–730, default 90)
+sets the window.
+
+| Field | Contents |
+|---|---|
+| `summary` | jurisdictions and cities touched, transaction count and value, cross-border and high-risk value with their share of the book, flagged transactions, AML alerts, the domestic country and the ledger currency |
+| `countries[]` | per counterparty jurisdiction: ISO-3166 alpha-3 code, name, centroid latitude/longitude, region, `risk_level`, transaction count, total / inbound / outbound value, flagged count, counterparty and resident customers, listed instruments, watchlist and PEP entries, share of value |
+| `cities[]` | per customer location: coordinates, customers, high-risk customers, transaction count, total and cross-border value, flagged transactions, AML alerts, share of value |
+| `corridors[]` | customer home city → counterparty jurisdiction, with both endpoints' coordinates, risk level, count, total / inbound / outbound value and flagged count. Capped at the 40 largest by value |
+| `trend[]` | daily domestic, cross-border and high-risk value |
+| `unmapped[]` | codes or city names present in the ledger with no reference coordinates — reported rather than silently dropped |
+
+`risk_level` is `high` for the jurisdictions in the AML rule set's high-risk list (the same
+constant the monitoring rules use), `elevated` where the loaded watchlists carry entries for
+that jurisdiction, and `standard` otherwise. Coordinates come from
+`app/seed/geo_reference.py`; every figure comes from the ledger.
 
 ## Executing an agent
 

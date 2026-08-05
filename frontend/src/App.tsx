@@ -8,6 +8,7 @@ const Login = lazy(() => import('@/pages/Login'))
 const Overview = lazy(() => import('@/pages/Overview'))
 const Agents = lazy(() => import('@/pages/Agents'))
 const AgentDetail = lazy(() => import('@/pages/AgentDetail'))
+const Geography = lazy(() => import('@/pages/Geography'))
 const Executions = lazy(() => import('@/pages/Executions'))
 const ExecutionDetail = lazy(() => import('@/pages/ExecutionDetail'))
 const Approvals = lazy(() => import('@/pages/Approvals'))
@@ -63,6 +64,7 @@ export function App() {
           <Route path="/" element={<Overview />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/agents/:agentKey" element={<AgentDetail />} />
+          <Route path="/geography" element={<Geography />} />
           <Route path="/executions" element={<Executions />} />
           <Route path="/executions/:executionId" element={<ExecutionDetail />} />
           <Route path="/approvals" element={<Approvals />} />

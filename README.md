@@ -18,9 +18,10 @@ Five agents are implemented end to end. Ten more are registered and clearly mark
 | Hybrid RAG (vector + BM25) with citations | Working — Qdrant when configured, exact cosine in-database otherwise |
 | Human approvals that suspend and resume real executions | Working, with segregation of duties and a full decision timeline |
 | Cost ledger by agent / model / provider / user / department / tool | Working, with forecasting and budget alerts |
+| Geography: transaction corridors, customer locations and jurisdiction risk on a rotating globe | Working — aggregated from the ledger, coordinates from a static ISO-3166 reference |
 | RBAC, API keys, MFA (TOTP), Keycloak SSO, audit trail, secrets, feature flags | Working |
 | Observability: OTel spans, Prometheus metrics, structured correlated logs, SSE/WebSocket streaming | Working |
-| React 19 console: 17 pages, live trace waterfall, React Flow DAG, cost and security dashboards | Working |
+| React 19 console: 18 pages, live trace waterfall, React Flow DAG, orthographic geography globe, cost and security dashboards | Working |
 | Docker Compose, Kubernetes manifests, Helm chart, GitHub Actions CI | Working |
 
 ### What requires configuration to work
