@@ -25,7 +25,8 @@ data:
   MAX_CONCURRENT_EXECUTIONS: "32"
   EXECUTION_TIMEOUT_SECONDS: "900"
   DATA_RETENTION_DAYS: "400"
-  CORS_ORIGINS: https://finops.example.com
+  # Comma-separated. Both applications call this API, so both origins must be listed.
+  CORS_ORIGINS: https://execute.finops.example.com,https://console.finops.example.com
 ---
 # Secrets are supplied by the External Secrets Operator from Vault.
 # The manifest below documents the required keys; never commit real values.

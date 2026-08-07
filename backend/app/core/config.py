@@ -9,10 +9,10 @@ Nothing is faked -- a capability that requires an unconfigured provider fails lo
 from __future__ import annotations
 
 import functools
-from typing import Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -28,7 +28,17 @@ class Settings(BaseSettings):
     environment: Literal["local", "dev", "staging", "production"] = "local"
     debug: bool = False
     api_prefix: str = "/api/v1"
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://localhost:4173"])
+    # NoDecode is required: pydantic-settings JSON-decodes complex types straight from the
+    # environment *before* any validator runs, so without it a comma-separated value —
+    # the form every deployment writes — fails at import with an opaque SettingsError.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "http://localhost:5173",   # platform console (dev)
+            "http://localhost:5174",   # execute console (dev)
+            "http://localhost:4173",
+            "http://localhost:4174",
+        ]
+    )
     root_path: str = ""
 
     # --- Database -----------------------------------------------------------
@@ -161,10 +171,31 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins", mode="before")
     @classmethod
-    def _split_origins(cls, v):
-        if isinstance(v, str):
-            return [o.strip() for o in v.split(",") if o.strip()]
-        return v
+    def _split_origins(cls, value: Any) -> list[str]:
+        """Accept a comma-separated list, a JSON array, or a real list.
+
+        Deployments write `CORS_ORIGINS=https://a.example,https://b.example`; Helm and
+        Compose both produce that form. A JSON array is accepted too so existing
+        configurations keep working.
+        """
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("["):
+                import json
+
+                try:
+                    decoded = json.loads(text)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"CORS_ORIGINS looks like JSON but will not parse: {exc}. "
+                        "Use a comma-separated list instead, for example "
+                        "https://execute.example.com,https://console.example.com"
+                    ) from exc
+                return [str(item).strip() for item in decoded if str(item).strip()]
+            return [origin.strip() for origin in text.split(",") if origin.strip()]
+        return [str(item).strip() for item in value if str(item).strip()]
 
     @property
     def is_sqlite(self) -> bool:

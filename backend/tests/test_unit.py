@@ -214,3 +214,68 @@ class TestIdentityAlgorithms:
         assert normalise_name("José  Márquez-Peña") == "jose marquez pena"
         assert name_similarity("Viktor Petrovich Sokolov", "Viktor Petrovich Sokolov") == 1.0
         assert name_similarity("Rajesh Kumar", "Priya Sharma") < 0.4
+
+
+class TestSettingsParsing:
+    """`CORS_ORIGINS` is the one setting every deployment edits by hand.
+
+    pydantic-settings JSON-decodes complex types straight from the environment before any
+    validator runs, so a comma-separated value — the form Compose, Helm and every `.env`
+    write — used to fail at import with an opaque SettingsError, taking down `init-db`
+    before it could create a single table. These cases pin every form we accept.
+    """
+
+    @staticmethod
+    def _origins(raw: str | None) -> list[str]:
+        import os
+
+        from app.core.config import Settings
+
+        previous = os.environ.get("CORS_ORIGINS")
+        if raw is None:
+            os.environ.pop("CORS_ORIGINS", None)
+        else:
+            os.environ["CORS_ORIGINS"] = raw
+        try:
+            return Settings().cors_origins
+        finally:
+            if previous is None:
+                os.environ.pop("CORS_ORIGINS", None)
+            else:
+                os.environ["CORS_ORIGINS"] = previous
+
+    def test_comma_separated_is_the_documented_form(self):
+        assert self._origins("https://execute.example.com,https://console.example.com") == [
+            "https://execute.example.com",
+            "https://console.example.com",
+        ]
+
+    def test_whitespace_and_trailing_separators_are_tolerated(self):
+        assert self._origins(" https://a.example , https://b.example , ") == [
+            "https://a.example",
+            "https://b.example",
+        ]
+
+    def test_json_arrays_still_work(self):
+        assert self._origins('["https://a.example", "https://b.example"]') == [
+            "https://a.example",
+            "https://b.example",
+        ]
+
+    def test_a_single_origin_is_a_list_of_one(self):
+        assert self._origins("https://only.example") == ["https://only.example"]
+
+    def test_empty_means_no_origins_not_a_crash(self):
+        assert self._origins("") == []
+
+    def test_the_default_covers_both_dev_servers(self):
+        origins = self._origins(None)
+        assert "http://localhost:5173" in origins   # platform console
+        assert "http://localhost:5174" in origins   # execute console
+
+    def test_malformed_json_explains_itself(self):
+        import pytest
+
+        with pytest.raises(Exception) as caught:
+            self._origins('["https://a.example",')
+        assert "comma-separated" in str(caught.value)

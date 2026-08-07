@@ -45,7 +45,7 @@ helm upgrade --install finops infra/helm/finops \
   --set image.api.tag=1.0.0 \
   --set image.web.tag=1.0.0 \
   --set ingress.host=finops.yourbank.example \
-  --set config.corsOrigins=https://finops.yourbank.example \
+  --set config.corsOrigins=https://execute.yourbank.example\,https://console.yourbank.example \
   --set externalSecrets.vaultPathPrefix=finops \
   --wait --timeout 10m
 ```
@@ -147,4 +147,4 @@ reverted with `POST /api/v1/agents/{key}/versions/{n}/rollback` without a redepl
 - [ ] Budgets set to real figures for the business unit
 - [ ] Prometheus scraping `/metrics`; Grafana dashboard imported; alert routes tested
 - [ ] Backup job verified by an actual restore, not just a green tick
-- [ ] `CORS_ORIGINS` restricted to the console hostname
+- [ ] `CORS_ORIGINS` restricted to the two console hostnames — comma-separated, no wildcard
