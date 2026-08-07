@@ -88,29 +88,30 @@ jobs:
   frontend:
     name: Frontend build & tests
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
       - run: npm ci --no-audit --no-fund
-      - name: Type check
+      - name: Type check (shared, execute, console)
         run: npm run typecheck
       - name: Lint
         run: npm run lint || true
       - name: Unit tests
         run: npm run test
-      - name: Build
+      - name: Build both applications
         run: npm run build
       - uses: actions/upload-artifact@v4
         with:
-          name: frontend-dist
-          path: frontend/dist
+          name: execute-dist
+          path: apps/execute/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: console-dist
+          path: apps/console/dist
 
   security:
     name: Security scanning
@@ -150,9 +151,14 @@ jobs:
       matrix:
         include:
           - context: backend
+            dockerfile: backend/Dockerfile
             image: agent-api
-          - context: frontend
-            image: agent-web
+          - context: .
+            dockerfile: apps/execute/Dockerfile
+            image: agent-execute
+          - context: .
+            dockerfile: apps/console/Dockerfile
+            image: agent-console
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -173,6 +179,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

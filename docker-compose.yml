@@ -215,11 +215,24 @@ services:
     depends_on:
       redis: { condition: service_healthy }
 
-  web:
+  # Application 1 — Execute console: sign in, run the board's agents, read their analytics.
+  execute:
     build:
-      context: ./frontend
-      args: { VITE_API_BASE_URL: "" }
+      context: .
+      dockerfile: apps/execute/Dockerfile
+      args:
+        VITE_API_BASE_URL: ""
+        VITE_EXECUTE_AGENTS: "${EXECUTE_AGENTS:-customer_service,aml_investigation}"
     ports: ["8080:8080"]
+    depends_on: [api]
+
+  # Application 2 — Platform console: everything else.
+  console:
+    build:
+      context: .
+      dockerfile: apps/console/Dockerfile
+      args: { VITE_API_BASE_URL: "" }
+    ports: ["8090:8080"]
     depends_on: [api]
 
 volumes:

@@ -21,7 +21,7 @@ Five agents are implemented end to end. Ten more are registered and clearly mark
 | Geography: transaction corridors, customer locations and jurisdiction risk on a rotating globe | Working — aggregated from the ledger, coordinates from a static ISO-3166 reference |
 | RBAC, API keys, MFA (TOTP), Keycloak SSO, audit trail, secrets, feature flags | Working |
 | Observability: OTel spans, Prometheus metrics, structured correlated logs, SSE/WebSocket streaming | Working |
-| React 19 console: 18 pages, live trace waterfall, React Flow DAG, orthographic geography globe, cost and security dashboards | Working |
+| React 19 front end: two applications — Execute (run agents, read analytics) and the platform console (18 pages: live trace waterfall, React Flow DAG, geography globe, cost and security dashboards) | Working |
 | Docker Compose, Kubernetes manifests, Helm chart, GitHub Actions CI | Working |
 
 ### What requires configuration to work
@@ -55,7 +55,8 @@ docker compose exec api python -m app.cli seed-banking   # optional sample bank
 
 | Surface | URL |
 |---|---|
-| Console | http://localhost:8080 |
+| Execute (application 1) | http://localhost:8080 |
+| Platform console (application 2) | http://localhost:8090 |
 | API + OpenAPI | http://localhost:8000/docs |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
@@ -76,8 +77,10 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/python -m app.cli seed-banking --customers 24
 .venv/bin/uvicorn app.main:app --reload --port 8000
 
-# Frontend
-cd frontend && npm install && npm run dev      # http://localhost:5173
+# Front end — one npm workspace, two applications
+npm install
+npm run dev:execute     # application 1 — http://localhost:5174
+npm run dev:console     # application 2 — http://localhost:5173
 ```
 
 SQLite is the default so a laptop needs no infrastructure. Point `DATABASE_URL` at
@@ -90,6 +93,36 @@ cd backend
 .venv/bin/python -m app.cli run-agent knowledge_assistant \
   --input '{"query":"What is our incident severity classification?"}'
 ```
+
+---
+
+## Two applications, one backend
+
+The front end ships as two separately deployed applications over the same FastAPI backend,
+the same database and the same auth realm. Splitting the deployment, not the system of
+record, means a run started in **Execute** is the same execution the **platform console**
+traces, prices and audits.
+
+| | **Execute** (application 1) | **Platform console** (application 2) |
+|---|---|---|
+| Purpose | Operators run agents and read how they are performing | Engineering, risk and compliance run the platform |
+| Screens | Login, then a dashboard with exactly two destinations: **Execute** and **Analytics** | 18 pages — agents, executions, approvals, cost, knowledge, tools, services, evaluation, playground, builder, logs, security, geography, settings |
+| Agents | **Two on the board at a time**, chosen from the five implemented agents and swappable per operator | All fifteen, including the ten marked *Coming soon* |
+| Image | `agent-execute` | `agent-console` |
+| Dev / Compose port | 5174 / 8080 | 5173 / 8090 |
+
+The Execute screen is a complete execution surface, not a launcher: a form generated from
+the agent's own input schema, the live SSE event stream (nodes, tool calls with arguments
+and results, model calls, guardrails), the human-approval gate with approve/reject and
+segregation of duties enforced, cancellation, and the final response with citations,
+structured output, tokens, latency and cost. Analytics reads throughput, success rate,
+latency, spend by model and per-tool reliability for the two agents on the board.
+
+Which pair loads by default is a deployment setting (`VITE_EXECUTE_AGENTS`, default
+`customer_service,aml_investigation`); an operator can swap either slot for another
+implemented agent and the choice sticks per browser.
+
+Details in [`docs/APPLICATIONS.md`](docs/APPLICATIONS.md).
 
 ---
 
@@ -163,7 +196,7 @@ narrow content checks where a specific fact matters. Verdicts are `passed`, `fai
 
 ```bash
 cd backend && .venv/bin/pytest -q       # 90 unit, integration and conformance tests
-cd frontend && npm run test && npm run typecheck && npm run build
+npm run test && npm run typecheck && npm run build   # shared + both applications
 ```
 
 The integration suite drives the whole graph through a scripted provider double: tool
@@ -176,6 +209,7 @@ and the runner is exercised end to end including a caught hallucination.
 
 ## Documentation
 
+- [`docs/APPLICATIONS.md`](docs/APPLICATIONS.md) — the two applications, what each one is for, and how they are deployed
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — engine, router, RAG, state and failure handling
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — Compose, Kubernetes, Helm, scaling, backup and restore
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — runbooks, alerts, incident response, retention
@@ -191,10 +225,12 @@ and the runner is exercised end to end including a caught hallucination.
 ## Repository layout
 
 ```
-backend/     FastAPI app, execution engine, agents, tools, RAG, migrations, tests
-frontend/    React 19 + TypeScript console
-infra/       Kubernetes, Helm, Prometheus, Grafana, OpenTelemetry, nginx
-docs/        Architecture, deployment, operations, security, API
+backend/            FastAPI app, execution engine, agents, tools, RAG, migrations, tests
+apps/execute/       Application 1 — login, Execute, Analytics
+apps/console/       Application 2 — everything else
+packages/shared/    Design system, API client and stores used by both applications
+infra/              Kubernetes, Helm, Prometheus, Grafana, OpenTelemetry, nginx
+docs/               Architecture, deployment, operations, security, API
 ```
 
 ## Licence

@@ -1,20 +1,26 @@
+# Two front-end applications over one API.
+#
+#   finops-execute — sign in, run the board's agents, read their analytics
+#   finops-console — the rest of the platform
+#
+# Routed by host so each keeps its own root path for client-side routing.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: finops-web
+  name: finops-execute
   namespace: finops
 spec:
   replicas: 2
   selector:
-    matchLabels: { app: finops-web }
+    matchLabels: { app: finops-execute }
   template:
     metadata:
-      labels: { app: finops-web, component: web }
+      labels: { app: finops-execute, component: web }
     spec:
       securityContext: { runAsNonRoot: true, runAsUser: 101 }
       containers:
         - name: web
-          image: ghcr.io/finops/agent-web:1.0.0
+          image: ghcr.io/finops/agent-execute:1.0.0
           ports: [{ name: http, containerPort: 8080 }]
           resources:
             requests: { cpu: 50m, memory: 96Mi }
@@ -35,10 +41,53 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: finops-web
+  name: finops-execute
   namespace: finops
 spec:
-  selector: { app: finops-web }
+  selector: { app: finops-execute }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-console
+  namespace: finops
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: finops-console }
+  template:
+    metadata:
+      labels: { app: finops-console, component: web }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 101 }
+      containers:
+        - name: web
+          image: ghcr.io/finops/agent-console:1.0.0
+          ports: [{ name: http, containerPort: 8080 }]
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { cpu: 300m, memory: 256Mi }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: cache, mountPath: /var/cache/nginx }
+            - { name: run, mountPath: /var/run }
+      volumes:
+        - { name: cache, emptyDir: {} }
+        - { name: run, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: finops-console
+  namespace: finops
+spec:
+  selector: { app: finops-console }
   ports: [{ name: http, port: 80, targetPort: http }]
 ---
 apiVersion: networking.k8s.io/v1
@@ -56,10 +105,10 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: [finops.example.com]
+    - hosts: [execute.finops.example.com, console.finops.example.com]
       secretName: finops-tls
   rules:
-    - host: finops.example.com
+    - host: execute.finops.example.com
       http:
         paths:
           - path: /api
@@ -70,4 +119,16 @@ spec:
             backend: { service: { name: finops-api, port: { number: 8000 } } }
           - path: /
             pathType: Prefix
-            backend: { service: { name: finops-web, port: { number: 80 } } }
+            backend: { service: { name: finops-execute, port: { number: 80 } } }
+    - host: console.finops.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: finops-api, port: { number: 8000 } } }
+          - path: /health
+            pathType: Prefix
+            backend: { service: { name: finops-api, port: { number: 8000 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: finops-console, port: { number: 80 } } }

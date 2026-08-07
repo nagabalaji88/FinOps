@@ -7,11 +7,15 @@ FinOps AI Command Center {{ .Chart.AppVersion }} is installed as "{{ .Release.Na
    kubectl --namespace {{ .Release.Namespace }} exec deploy/{{ include "finops.fullname" . }}-api -- \
      python -m app.cli health
 
-3. Reach the console:
-{{- if .Values.ingress.enabled }}
-   https://{{ .Values.ingress.host }}
+3. Reach the applications:
+{{- range $key, $app := .Values.web }}
+{{- if $app.enabled }}
+{{- if $.Values.ingress.enabled }}
+   {{ $key }}: https://{{ $app.host }}
 {{- else }}
-   kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "finops.fullname" . }}-web 8080:80
+   {{ $key }}: kubectl --namespace {{ $.Release.Namespace }} port-forward svc/{{ include "finops.fullname" $ }}-{{ $key }} 8080:80
+{{- end }}
+{{- end }}
 {{- end }}
 
 4. Rotate the bootstrap administrator password before granting access.

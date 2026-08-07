@@ -54,14 +54,16 @@ cat > "$STAGING/$BUNDLE/BUILD_INFO.json" <<JSON
   "built_at": "${BUILT_AT}",
   "file_count": ${FILE_COUNT},
   "contents": [
-    "backend/  FastAPI application, execution engine, agents, tools, RAG, migrations, tests",
-    "frontend/ React 19 + TypeScript console",
-    "infra/    Kubernetes, Helm, Prometheus, Grafana, OpenTelemetry, nginx",
-    "docs/     Architecture, deployment, operations, security, agents, API, process, validation",
-    "scripts/  Packaging"
+    "backend/         FastAPI application, execution engine, agents, tools, RAG, migrations, tests",
+    "apps/execute/    Application 1 - login, Execute and Analytics",
+    "apps/console/    Application 2 - the rest of the platform",
+    "packages/shared/ Design system, API client and stores shared by both applications",
+    "infra/           Kubernetes, Helm, Prometheus, Grafana, OpenTelemetry, nginx",
+    "docs/            Architecture, deployment, operations, security, agents, API, process, validation",
+    "scripts/         Packaging"
   ],
   "excluded": [
-    "backend/.venv", "frontend/node_modules", "frontend/dist",
+    "backend/.venv", "node_modules", "apps/*/dist",
     "*.db", "backend/var", ".env", ".git"
   ],
   "getting_started": "See README.md. At least one LLM provider key is required to execute agents."

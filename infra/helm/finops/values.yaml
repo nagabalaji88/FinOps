@@ -8,10 +8,6 @@ image:
     repository: ghcr.io/finops/agent-api
     tag: "1.0.0"
     pullPolicy: IfNotPresent
-  web:
-    repository: ghcr.io/finops/agent-web
-    tag: "1.0.0"
-    pullPolicy: IfNotPresent
 imagePullSecrets: []
 
 api:
@@ -30,11 +26,31 @@ api:
     enabled: true
     minAvailable: 2
 
+# Two front-end applications over the same API. Each is its own image, Deployment,
+# Service and host; disable either without touching the other.
 web:
-  replicaCount: 2
-  resources:
-    requests: { cpu: 50m, memory: 96Mi }
-    limits: { cpu: 300m, memory: 256Mi }
+  execute:
+    enabled: true
+    host: execute.finops.example.com
+    replicaCount: 2
+    image:
+      repository: ghcr.io/finops/agent-execute
+      tag: "1.0.0"
+      pullPolicy: IfNotPresent
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 300m, memory: 256Mi }
+  console:
+    enabled: true
+    host: console.finops.example.com
+    replicaCount: 2
+    image:
+      repository: ghcr.io/finops/agent-console
+      tag: "1.0.0"
+      pullPolicy: IfNotPresent
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 300m, memory: 256Mi }
 
 worker:
   enabled: true
@@ -56,7 +72,7 @@ migration:
 ingress:
   enabled: true
   className: nginx
-  host: finops.example.com
+  # Hosts come from web.<app>.host above; one certificate covers both.
   tls:
     enabled: true
     secretName: finops-tls
@@ -76,7 +92,7 @@ config:
   executionTimeoutSeconds: "900"
   dataRetentionDays: "400"
   rateLimitPerMinute: "240"
-  corsOrigins: https://finops.example.com
+  corsOrigins: https://execute.finops.example.com,https://console.finops.example.com
   otelEndpoint: http://otel-collector.observability:4318
   qdrantUrl: http://finops-qdrant:6333
   kafkaBootstrapServers: ""
