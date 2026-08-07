@@ -27,6 +27,10 @@ for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "AZURE_OPEN
             "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY",
             "TOGETHER_API_KEY", "OLLAMA_BASE_URL"):
     os.environ.pop(var, None)
+# The scripted provider answers with canned agent responses, which is meaningless as a
+# rail classifier. The suite therefore runs NeMo's deterministic rails only; the LLM-backed
+# self-check rails are covered separately in test_guardrails.py against a stub classifier.
+os.environ.setdefault("NEMO_LLM_RAILS_ENABLED", "false")
 
 from app.core.config import get_settings  # noqa: E402
 

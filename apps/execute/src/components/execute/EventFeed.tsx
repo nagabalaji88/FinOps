@@ -26,7 +26,7 @@ type Tone = 'ok' | 'warn' | 'err' | 'info' | 'idle'
 
 interface Descriptor {
   icon: typeof BoltIcon
-  tone: Tone
+  tone: Tone | ((payload: Record<string, any>) => Tone)
   title: (payload: Record<string, any>) => string
   detail?: (payload: Record<string, any>) => string | null
   expandable?: boolean
@@ -105,9 +105,25 @@ const DESCRIPTORS: Record<string, Descriptor> = {
   },
   guardrail: {
     icon: ShieldCheckIcon,
-    tone: 'warn',
-    title: (p) => `Guardrails: ${p.findings?.length ?? 0} findings`,
-    detail: (p) => (p.modified ? 'response was modified' : null),
+    // The engine emits this for its own rules and for the NeMo input/output rails; the
+    // payload says which, so the feed names the control that actually ran.
+    tone: (p) => (p.blocked ? 'err' : p.findings?.length ? 'warn' : 'ok'),
+    title: (p) => {
+      const side = p.rails === 'input' ? 'Input rails' : p.rails === 'output' ? 'Output rails' : 'Guardrails'
+      if (p.evaluated === false) return `${side} skipped`
+      if (p.blocked) return `${side} blocked the run`
+      const count = p.findings?.length ?? 0
+      return count ? `${side}: ${count} finding${count === 1 ? '' : 's'}` : `${side} passed`
+    },
+    detail: (p) => {
+      const rules = (p.findings ?? []).map((f: any) => f.rule).filter(Boolean)
+      const parts = [
+        rules.length ? rules.join(', ') : null,
+        p.modified ? 'response was modified' : null,
+        p.llm_rails === false && p.rails ? 'deterministic rails only' : null,
+      ].filter(Boolean)
+      return parts.length ? parts.join(' · ') : null
+    },
     expandable: true,
   },
   'approval.requested': {
@@ -149,7 +165,9 @@ function Row({ event, index }: { event: ExecutionEvent; index: number }) {
   const descriptor = DESCRIPTORS[event.type]
   if (!descriptor) return null
   const Icon = descriptor.icon
-  const detail = descriptor.detail?.(event.payload ?? {})
+  const payload = event.payload ?? {}
+  const tone = typeof descriptor.tone === 'function' ? descriptor.tone(payload) : descriptor.tone
+  const detail = descriptor.detail?.(payload)
   const expandable = descriptor.expandable && event.payload && Object.keys(event.payload).length > 0
 
   return (
@@ -165,9 +183,9 @@ function Row({ event, index }: { event: ExecutionEvent; index: number }) {
         role={expandable ? 'button' : undefined}
         aria-expanded={expandable ? open : undefined}
       >
-        <Icon className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', TONE_TEXT[descriptor.tone])} />
+        <Icon className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', TONE_TEXT[tone])} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs text-ink">{descriptor.title(event.payload ?? {})}</p>
+          <p className="truncate text-xs text-ink">{descriptor.title(payload)}</p>
           {detail ? <p className="truncate text-2xs text-ink-subtle">{detail}</p> : null}
         </div>
         <time className="shrink-0 pt-0.5 font-mono text-2xs text-ink-subtle">

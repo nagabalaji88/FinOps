@@ -27,15 +27,19 @@ re-implements them per agent, and nobody can skip them.
 
 | Node | Responsibility | Skipped when |
 |---|---|---|
+| `input_rails` | NeMo Guardrails input rails: injection, control bypass, out-of-mandate requests, financial-crime facilitation. A refusal ends the run before anything reads a system of record | the agent has no rail configuration |
 | `planner` | LLM produces a JSON plan: objective, steps, required tools, risk level | never |
 | `retriever` | Hybrid vector + BM25 retrieval over the agent's knowledge sources | agent has no sources, or the plan sets `needs_knowledge_search: false` |
 | `memory` | Loads the conversation thread and durable facts | memory disabled or no thread id |
 | `llm` | The agentic loop: model decides, tools execute, observations feed back | never |
 | `tools` | Executes tool calls (inside the `llm` node) | no tool calls requested |
 | `validation` | Non-empty response, tool success, citation presence, output schema, groundedness | never |
-| `guardrails` | PII masking, blocked terms, prompt-injection detection, mandated disclaimers | never |
+| `guardrails` | PII masking, blocked terms, prompt-injection detection, mandated disclaimers, then the NeMo output rails (tipping-off detection, sensitive disclosure) | never |
 | `human_approval` | Suspends for a reviewer when policy requires | agent does not require final approval, or risk below threshold |
 | `response` | Finalises output, citations, artifacts and memory | never |
+
+Rails fail closed: a rail that cannot be evaluated blocks the run rather than passing it.
+See [`GUARDRAILS.md`](GUARDRAILS.md).
 
 Each node opens a span, emits streaming events, and commits its work before the next node
 runs. Progressive commits mean the console sees the trace build in real time and write

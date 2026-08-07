@@ -17,6 +17,7 @@ Five agents are implemented end to end. Ten more are registered and clearly mark
 | 40 tools over the banking system of record | Working — schema-validated, timed, health-tracked, approval-gated where it matters |
 | Hybrid RAG (vector + BM25) with citations | Working — Qdrant when configured, exact cosine in-database otherwise |
 | Human approvals that suspend and resume real executions | Working, with segregation of duties and a full decision timeline |
+| NeMo Guardrails rails on the two production agents (injection, control bypass, unlicensed advice, financial-crime facilitation, tipping off, PII disclosure) | Working — deterministic rails need no credentials, LLM-backed rails route through the model router, and every failure mode blocks rather than passes |
 | Cost ledger by agent / model / provider / user / department / tool | Working, with forecasting and budget alerts |
 | Geography: transaction corridors, customer locations and jurisdiction risk on a rotating globe | Working — aggregated from the ledger, coordinates from a static ISO-3166 reference |
 | RBAC, API keys, MFA (TOTP), Keycloak SSO, audit trail, secrets, feature flags | Working |
@@ -139,6 +140,12 @@ Details in [`docs/APPLICATIONS.md`](docs/APPLICATIONS.md).
 Identity checks use the published algorithms: ICAO 9303 MRZ check digits, the Verhoeff
 checksum for Aadhaar, and ITD structure rules for PAN — not approximations.
 
+**Customer Service** and **AML Investigation** — the two agents on the Execute board — also
+carry [NeMo Guardrails](docs/GUARDRAILS.md) rail configurations: input rails that refuse a
+request before anything reads a system of record, and output rails that mask identifiers
+and block tipping off. Rails fail closed, so an agent that declares them is refused rather
+than executed unguarded.
+
 ### Roadmap agents (registered, not executable)
 
 Credit Risk · Trading · Legal Contract · Compliance · Financial Planning ·
@@ -214,6 +221,7 @@ and the runner is exercised end to end including a caught hallucination.
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — Compose, Kubernetes, Helm, scaling, backup and restore
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — runbooks, alerts, incident response, retention
 - [`docs/SECURITY.md`](docs/SECURITY.md) — RBAC matrix, auth flows, secrets, audit, data handling
+- [`docs/GUARDRAILS.md`](docs/GUARDRAILS.md) — the NeMo rails on each production agent, and why they fail closed
 - [`docs/PROCESS.md`](docs/PROCESS.md) — what each agent does, step by step, and where a human decides
 - [`docs/AGENTS.md`](docs/AGENTS.md) — agent contracts, tool catalogue, building a new agent
 - [`docs/API.md`](docs/API.md) — endpoint reference and streaming protocol

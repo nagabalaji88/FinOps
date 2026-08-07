@@ -108,6 +108,21 @@ class Settings(BaseSettings):
     bedrock_endpoint: str | None = None
 
     default_model: str = "claude-sonnet-4-5"
+
+    # --- NeMo Guardrails -----------------------------------------------------
+    # Rail configurations live in app/guardrails/configs/<agent_key>/. Deterministic rails
+    # run with no credentials; the LLM-backed self-check rails need a provider and are
+    # removed from the configuration when none is set.
+    nemo_guardrails_enabled: bool = True
+    # Model used by the LLM-backed rails. Empty falls back to default_model. A small, cheap
+    # model is the right choice here — rails classify, they do not write.
+    guardrails_model: str = ""
+    # Block the run when an input rail refuses. Turning this off records the finding and
+    # lets the run continue, which is only appropriate while tuning a new rail.
+    nemo_block_on_input_rail: bool = True
+    # Run the LLM-backed self-check rails. They are also removed automatically when no
+    # provider is configured; set this false to run deterministic rails only.
+    nemo_llm_rails_enabled: bool = True
     default_embedding_model: str = "text-embedding-3-small"
     llm_timeout_seconds: int = 120
     llm_max_retries: int = 3

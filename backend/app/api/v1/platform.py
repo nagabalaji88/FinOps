@@ -238,7 +238,10 @@ async def connected_services(principal: PrincipalDep) -> dict[str, Any]:
          "required": c.missing()}
         for c in CONNECTORS.values()
     ]
-    all_services = providers + list(infra) + connectors
+    from app.guardrails.nemo import nemo_guardrails
+
+    guardrails = [nemo_guardrails.status()]
+    all_services = providers + list(infra) + connectors + guardrails
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "summary": {

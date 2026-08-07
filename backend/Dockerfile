@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 COPY pyproject.toml ./
 RUN python -m venv /opt/venv && /opt/venv/bin/pip install --upgrade pip setuptools wheel
 COPY app ./app
-RUN /opt/venv/bin/pip install ".[vector,streams,storage,ocr,oidc,vault]"
+RUN /opt/venv/bin/pip install ".[vector,streams,storage,ocr,oidc,vault,guardrails]"
 
 FROM base AS runtime
 # tesseract powers the KYC OCR tool; libmagic assists content sniffing

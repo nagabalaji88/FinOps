@@ -28,6 +28,14 @@ from app.db.models.agents import Approval, Span
 from app.db.models.knowledge import KnowledgeSource, MemoryMessage, MemoryThread
 from app.engine.events import EventEmitter, EventType
 from app.engine.state import ExecutionState, PendingApproval
+from app.guardrails.nemo import nemo_guardrails
+from app.guardrails.patterns import (
+    PII_PATTERNS,
+    PROMPT_INJECTION_PATTERNS,
+)
+from app.guardrails.patterns import (
+    mask as _mask,
+)
 from app.llm.router import router
 from app.llm.types import Message, ToolCall
 from app.rag.pipeline import pipeline
@@ -35,20 +43,7 @@ from app.tools.base import ToolContext, registry
 
 log = get_logger("engine.nodes")
 
-PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("pan", re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]\b")),
-    ("aadhaar", re.compile(r"\b\d{4}\s?\d{4}\s?\d{4}\b")),
-    ("card_number", re.compile(r"\b(?:\d[ -]?){13,19}\b")),
-    ("email", re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b")),
-    ("ssn", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
-]
 
-PROMPT_INJECTION_PATTERNS = [
-    re.compile(r"ignore (all )?(previous|prior|above) instructions", re.I),
-    re.compile(r"disregard (your|the) (system|safety) (prompt|rules)", re.I),
-    re.compile(r"reveal (your|the) (system prompt|instructions)", re.I),
-    re.compile(r"\bexfiltrate\b|\bdump (the )?(database|secrets)\b", re.I),
-]
 
 
 class ApprovalPause(Exception):
@@ -151,6 +146,62 @@ class Node:
         await ctx.emitter.emit(
             EventType.NODE_COMPLETED, {"node": self.key, "label": self.label}, node=self.key
         )
+
+
+# --- 0. Input rails ----------------------------------------------------------
+class InputRailsNode(Node):
+    """NeMo Guardrails input rails, before anything reads a system of record.
+
+    Skipped for agents with no rail configuration. A refusal ends the run here — the
+    request never reaches the planner, the retriever or a tool.
+    """
+
+    key = "input_rails"
+    label = "Input Rails"
+    kind = "guardrail"
+
+    async def should_run(self, ctx: RunContext) -> bool:
+        return nemo_guardrails.covers(ctx.agent.key)
+
+    async def run(self, ctx: RunContext) -> None:
+        state = ctx.state
+        text = _user_text(state.input)
+        span = await ctx.open_span("guardrails.input_rails", "guardrail",
+                                   inputs={"chars": len(text)})
+        result = await nemo_guardrails.check_input(
+            ctx.agent.key, text,
+            context={"pii_allowlist": list(ctx.agent.pii_allowlist or [])},
+        )
+        findings = [finding.to_dict() for finding in result.findings]
+        state.guardrail_findings.extend(findings)
+        await ctx.close_span(
+            span, status="error" if result.blocked else "ok",
+            outputs={"evaluated": result.evaluated, "blocked": result.blocked,
+                     "findings": findings, "llm_rails": result.llm_rails},
+        )
+        await ctx.emitter.emit(
+            EventType.GUARDRAIL,
+            {"rails": "input", "engine": "nemo", "findings": findings,
+             "blocked": result.blocked, "evaluated": result.evaluated,
+             "llm_rails": result.llm_rails, "reason": result.reason},
+            node=self.key,
+            log_message=f"Input rails: {len(findings)} findings"
+                        f"{', blocked' if result.blocked else ''}",
+        )
+        if result.blocked and settings.nemo_block_on_input_rail:
+            raise GuardrailViolation(
+                "Request blocked by input guardrails",
+                details={"findings": findings, "reason": result.reason},
+            )
+
+
+def _user_text(payload: dict[str, Any]) -> str:
+    """The natural-language part of an agent input, which is what a rail reads."""
+    for key in ("query", "question", "message", "request", "text", "narrative"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return json.dumps(payload, default=str)
 
 
 # --- 1. Planner --------------------------------------------------------------
@@ -734,29 +785,36 @@ class GuardrailNode(Node):
             response = f"{response}\n\n_{ctx.agent.required_disclaimer}_"
             findings.append({"rule": "disclaimer", "severity": "low", "action": "appended"})
 
+        # NeMo output rails run last, over the response the built-in rules already
+        # cleaned, so a rail sees exactly what a caller would receive.
+        rail_result = await nemo_guardrails.check_output(
+            ctx.agent.key, response, user_text=_user_text(state.input),
+            context={"pii_allowlist": list(ctx.agent.pii_allowlist or [])},
+        )
+        if rail_result.evaluated:
+            findings.extend(finding.to_dict() for finding in rail_result.findings)
+            if rail_result.text and not rail_result.blocked:
+                response = rail_result.text
+
         blocked = [f for f in findings if f["action"] == "blocked"]
         state.guardrail_findings.extend(findings)
         state.final_response = response
         await ctx.close_span(
             span, status="error" if blocked else "ok",
-            outputs={"findings": findings, "modified": response != original},
+            outputs={"findings": findings, "modified": response != original,
+                     "nemo_evaluated": rail_result.evaluated},
         )
         await ctx.emitter.emit(
             EventType.GUARDRAIL,
-            {"findings": findings, "modified": response != original, "blocked": bool(blocked)},
+            {"rails": "output", "findings": findings, "modified": response != original,
+             "blocked": bool(blocked), "nemo_evaluated": rail_result.evaluated,
+             "llm_rails": rail_result.llm_rails},
             node=self.key,
             log_message=f"Guardrails applied: {len(findings)} findings",
         )
         if blocked:
             raise GuardrailViolation("Response blocked by guardrails",
                                      details={"findings": blocked})
-
-
-def _mask(value: str) -> str:
-    digits = re.sub(r"\D", "", value)
-    if len(digits) >= 4:
-        return f"{'*' * max(len(value) - 4, 0)}{value[-4:]}"
-    return "*" * len(value)
 
 
 # --- 8. Human approval ---------------------------------------------------------
@@ -852,6 +910,7 @@ class ResponseNode(Node):
 
 
 DEFAULT_NODES: list[Node] = [
+    InputRailsNode(),
     PlannerNode(),
     RetrieverNode(),
     MemoryNode(),
@@ -863,6 +922,9 @@ DEFAULT_NODES: list[Node] = [
 ]
 
 GRAPH_DEFINITION = [
+    {"id": "input_rails", "label": "Input Rails", "kind": "guardrail",
+     "description": "NeMo Guardrails input rails: injection, control bypass, out-of-mandate "
+                    "requests and financial-crime facilitation."},
     {"id": "planner", "label": "Planner", "kind": "planner",
      "description": "Decomposes the request into an executable plan."},
     {"id": "retriever", "label": "Retriever", "kind": "retriever",
@@ -876,7 +938,8 @@ GRAPH_DEFINITION = [
     {"id": "validation", "label": "Validation", "kind": "validation",
      "description": "Schema, citation, groundedness and tool-success checks."},
     {"id": "guardrails", "label": "Guardrails", "kind": "guardrail",
-     "description": "PII masking, blocked terms, injection detection, disclaimers."},
+     "description": "PII masking, blocked terms, disclaimers, and NeMo Guardrails "
+                    "output rails including tipping-off detection."},
     {"id": "human_approval", "label": "Human Approval", "kind": "approval",
      "description": "Suspends execution for a reviewer decision when policy requires."},
     {"id": "response", "label": "Response", "kind": "response",
@@ -884,6 +947,7 @@ GRAPH_DEFINITION = [
 ]
 
 GRAPH_EDGES = [
+    {"source": "input_rails", "target": "planner"},
     {"source": "planner", "target": "retriever"},
     {"source": "retriever", "target": "memory"},
     {"source": "memory", "target": "llm"},
