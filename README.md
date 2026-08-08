@@ -3,7 +3,7 @@
 A control plane for running AI agents against real banking systems: orchestration,
 human-in-the-loop approvals, OpenTelemetry-style tracing, cost attribution, RBAC and audit.
 
-Five agents are implemented end to end. Ten more are registered and clearly marked
+Seven agents are implemented end to end. Eight more are registered and clearly marked
 **Coming soon** — the platform refuses to execute them rather than pretending.
 
 ---
@@ -14,10 +14,10 @@ Five agents are implemented end to end. Ten more are registered and clearly mark
 |---|---|
 | Execution engine (planner → retriever → memory → LLM ↔ tools → validation → guardrails → approval → response) | Working, with per-node spans, replayable event log and checkpointed suspend/resume |
 | Model router across OpenAI, Azure OpenAI, Anthropic, Gemini, Bedrock, Mistral, DeepSeek, Together, Ollama | Working, with circuit breakers, retry, fallback chain and per-call cost metering |
-| 40 tools over the banking system of record | Working — schema-validated, timed, health-tracked, approval-gated where it matters |
+| 67 tools over the banking system of record | Working — schema-validated, timed, health-tracked, approval-gated where it matters |
 | Hybrid RAG (vector + BM25) with citations | Working — Qdrant when configured, exact cosine in-database otherwise |
 | Human approvals that suspend and resume real executions | Working, with segregation of duties and a full decision timeline |
-| NeMo Guardrails rails on the two production agents (injection, control bypass, unlicensed advice, financial-crime facilitation, tipping off, PII disclosure) | Working — deterministic rails need no credentials, LLM-backed rails route through the model router, and every failure mode blocks rather than passes |
+| NeMo Guardrails rails on four production agents (injection, control bypass, unlicensed advice, financial-crime facilitation, tipping off, PII disclosure, fair lending, collections conduct) | Working — deterministic rails need no credentials, LLM-backed rails route through the model router, and every failure mode blocks rather than passes |
 | Cost ledger by agent / model / provider / user / department / tool | Working, with forecasting and budget alerts |
 | Geography: transaction corridors, customer locations and jurisdiction risk on a rotating globe | Working — aggregated from the ledger, coordinates from a static ISO-3166 reference |
 | RBAC, API keys, MFA (TOTP), Keycloak SSO, audit trail, secrets, feature flags | Working |
@@ -108,7 +108,7 @@ traces, prices and audits.
 |---|---|---|
 | Purpose | Operators run agents and read how they are performing | Engineering, risk and compliance run the platform |
 | Screens | Login, then a dashboard with exactly two destinations: **Execute** and **Analytics** | 18 pages — agents, executions, approvals, cost, knowledge, tools, services, evaluation, playground, builder, logs, security, geography, settings |
-| Agents | **Two on the board at a time**, chosen from the five implemented agents and swappable per operator | All fifteen, including the ten marked *Coming soon* |
+| Agents | **Two on the board at a time**, chosen from the implemented agents and swappable per operator | All fifteen, including the eight marked *Coming soon* |
 | Image | `agent-execute` | `agent-console` |
 | Dev / Compose port | 5174 / 8080 | 5173 / 8090 |
 
@@ -120,14 +120,14 @@ structured output, tokens, latency and cost. Analytics reads throughput, success
 latency, spend by model and per-tool reliability for the two agents on the board.
 
 Which pair loads by default is a deployment setting (`VITE_EXECUTE_AGENTS`, default
-`customer_service,aml_investigation`); an operator can swap either slot for another
-implemented agent and the choice sticks per browser.
+`customer_service,aml_investigation`); an operator can swap either slot for any of the
+seven implemented agents and the choice sticks per browser.
 
 Details in [`docs/APPLICATIONS.md`](docs/APPLICATIONS.md).
 
 ---
 
-## The five implemented agents
+## The seven implemented agents
 
 | Agent | What it does | Tools | Approval gate |
 |---|---|---|---|
@@ -136,20 +136,30 @@ Details in [`docs/APPLICATIONS.md`](docs/APPLICATIONS.md).
 | **AML Investigation** | Runs seven typology rules over the ledger, profiles the customer, builds a case timeline, collects evidence, drafts a SAR | 10 | SAR drafting, case closure |
 | **Investment Research** | Market data, SEC filings, portfolio valuation, historical VaR / expected shortfall / beta, sector comparison, fundamentals, macro indicators | 11 | Publishing a research note |
 | **Internal Knowledge Assistant** | Enterprise RAG with mandatory citations across policies, runbooks, architecture docs, Jira, Confluence, SharePoint, Slack, Teams | 5 | — |
+| **Credit Risk** | Bureau, FOIR against verified income, logistic scorecard PD, LGD after collateral haircuts, Basel III IRB capital, risk-based pricing, policy knockouts, limit recommendation | 13 | Recording the decision |
+| **Collections** | Arrears and RBI asset classification, collectability scoring, Fair Practices Code contact eligibility, hardship affordability, promises to pay, restructuring | 14 | Repayment plan, recovery referral |
 
 Identity checks use the published algorithms: ICAO 9303 MRZ check digits, the Verhoeff
 checksum for Aadhaar, and ITD structure rules for PAN — not approximations.
 
-**Customer Service** and **AML Investigation** — the two agents on the Execute board — also
-carry [NeMo Guardrails](docs/GUARDRAILS.md) rail configurations: input rails that refuse a
-request before anything reads a system of record, and output rails that mask identifiers
-and block tipping off. Rails fail closed, so an agent that declares them is refused rather
-than executed unguarded.
+Credit Risk implements the published models rather than approximating them: a logistic
+scorecard with points-to-double-the-odds scaling, the RBI's FOIR against income verified
+from the customer's own salary credits, and the Basel III IRB capital formula. Collections
+implements the RBI asset-classification ladder including the SMA sub-grades, and the Fair
+Practices Code contact rules — evaluated in the bank's local time, not UTC. Details in
+[`docs/CREDIT_AND_COLLECTIONS.md`](docs/CREDIT_AND_COLLECTIONS.md).
+
+**Customer Service**, **AML Investigation**, **Credit Risk** and **Collections** carry
+[NeMo Guardrails](docs/GUARDRAILS.md) rail configurations: input rails that refuse a request
+before anything reads a system of record, and output rails that mask identifiers, block
+tipping off, refuse reasoning from a protected characteristic and refuse collections
+threats. Rails fail closed, so an agent that declares them is refused rather than executed
+unguarded.
 
 ### Roadmap agents (registered, not executable)
 
-Credit Risk · Trading · Legal Contract · Compliance · Financial Planning ·
-Software Engineering · Treasury · Payment · Collections · Risk Management
+Trading · Legal Contract · Compliance · Financial Planning ·
+Software Engineering · Treasury · Payment · Risk Management
 
 ---
 
@@ -222,6 +232,7 @@ and the runner is exercised end to end including a caught hallucination.
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — runbooks, alerts, incident response, retention
 - [`docs/SECURITY.md`](docs/SECURITY.md) — RBAC matrix, auth flows, secrets, audit, data handling
 - [`docs/GUARDRAILS.md`](docs/GUARDRAILS.md) — the NeMo rails on each production agent, and why they fail closed
+- [`docs/CREDIT_AND_COLLECTIONS.md`](docs/CREDIT_AND_COLLECTIONS.md) — the lending agents: scorecard, Basel capital, RBI classification and the Fair Practices Code
 - [`docs/PROCESS.md`](docs/PROCESS.md) — what each agent does, step by step, and where a human decides
 - [`docs/AGENTS.md`](docs/AGENTS.md) — agent contracts, tool catalogue, building a new agent
 - [`docs/API.md`](docs/API.md) — endpoint reference and streaming protocol

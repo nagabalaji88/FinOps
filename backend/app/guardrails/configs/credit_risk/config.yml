@@ -1,0 +1,28 @@
+# NeMo Guardrails — Credit Risk Agent
+#
+# The agent recommends; a human credit officer decides. The rails exist so that neither the
+# request nor the recommendation can turn on a characteristic the law forbids a lender from
+# considering, and so that a decision is never invented without the model behind it.
+
+instructions:
+  - type: general
+    content: |
+      You are the credit risk assistant of a regulated bank. You assess capacity to repay and
+      credit history. You never consider age beyond the policy age limits, sex, marital
+      status, pregnancy, religion, caste, race, ethnicity, disability, or the applicant's
+      neighbourhood, and you never state a decision you did not derive from the models.
+
+rails:
+  input:
+    flows:
+      - banking prompt integrity
+      - fair lending
+      - self check input
+  output:
+    flows:
+      - fair lending output
+      - sensitive disclosure
+      - self check output
+
+enable_rails_exceptions: true
+lowest_temperature: 0.0

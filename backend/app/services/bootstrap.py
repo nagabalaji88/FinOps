@@ -18,8 +18,11 @@ from app.db.base import Base
 from app.db.models.agents import Agent, AgentVersion
 from app.db.models.banking import (
     Account,
+    BureauRecord,
     Card,
+    CreditApplication,
     Customer,
+    DelinquencyCase,
     FAQEntry,
     Holding,
     KycCase,
@@ -335,14 +338,26 @@ async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
                 expiry=f"{rng.randint(1, 12):02d}/{rng.randint(27, 31)}",
                 issued_on=(customer.onboarded_at or now).date(),
             ))
-        if rng.random() < 0.45:
+        # Customers in the reserved band always take a loan, so the delinquency spread is
+        # actually realised; a random draw over a small sample routinely produces none. The
+        # band sits after the credit applicants so an application profile is never distorted
+        # by a forced facility.
+        in_delinquency_band = _DELINQUENCY_BAND_START <= index < (
+            _DELINQUENCY_BAND_START + len(_DELINQUENCY_SPREAD))
+        if in_delinquency_band or rng.random() < 0.45:
             principal = round(rng.choice([300_000, 800_000, 2_500_000, 6_000_000]), 2)
             tenure = rng.choice([36, 60, 120, 240])
             rate = round(rng.uniform(8.4, 15.5), 2)
             monthly = rate / 1200
             emi = round(principal * monthly * (1 + monthly) ** tenure / ((1 + monthly) ** tenure - 1), 2)
             paid = rng.randint(0, tenure - 1)
-            dpd = rng.choices([0, 0, 0, 15, 45, 92], [0.72, 0.1, 0.06, 0.06, 0.04, 0.02])[0]
+            # The first loans take a fixed spread across the delinquency buckets so every
+            # seeded environment has something in each stage for collections to work; the
+            # rest follow the portfolio distribution.
+            if in_delinquency_band:
+                dpd = _DELINQUENCY_SPREAD[index - _DELINQUENCY_BAND_START]
+            else:
+                dpd = rng.choices([0, 0, 0, 15, 45, 92], [0.72, 0.1, 0.06, 0.06, 0.04, 0.02])[0]
             session.add(Loan(
                 loan_number=f"LN-{rng.randint(100000, 999999)}", customer_id=customer.id,
                 loan_type=rng.choice(["personal", "home", "auto", "education"]),
@@ -353,6 +368,10 @@ async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
                 disbursed_on=(customer.onboarded_at or now).date(),
             ))
     await session.flush()
+
+    txn_count += await _seed_income_and_repayments(session, created_customers, rng, now)
+    credit_seeded = await _seed_credit_book(session, created_customers, rng, now)
+    collections_seeded = await _seed_collections_book(session, created_customers, now)
 
     # FAQ knowledge for the customer service agent
     faqs = [
@@ -490,4 +509,206 @@ async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
         "price_bars": bars,
         "portfolios": 1,
         "kyc_cases": 1,
+        **credit_seeded,
+        **collections_seeded,
     }
+
+
+# --- credit and collections sample data ---------------------------------------
+async def _seed_income_and_repayments(session: AsyncSession, customers: list[Customer],
+                                      rng: random.Random, now: datetime) -> int:
+    """Monthly salary credits and loan repayments.
+
+    Affordability assessment verifies declared income against salary credits, and promise
+    performance is checked against categorised repayments, so both have to exist in the
+    ledger for those tools to return anything but "no evidence".
+    """
+    created = 0
+    for customer in customers:
+        accounts = (await session.execute(
+            select(Account).where(Account.customer_id == customer.id,
+                                  Account.account_type == "savings")
+        )).scalars().all()
+        if not accounts:
+            continue
+        account = accounts[0]
+        # Credit applicants must have salary credits consistent with what they declared,
+        # otherwise every affordability check reports a spurious income variance.
+        profile_index = customers.index(customer)
+        if profile_index < len(_APPLICATION_PROFILES):
+            declared = float(_APPLICATION_PROFILES[profile_index]["income"])
+            salary = round(declared * rng.uniform(0.97, 1.03), 2)
+        else:
+            salary = round(rng.choice([45_000, 65_000, 92_000, 140_000, 210_000]) *
+                           rng.uniform(0.95, 1.05), 2)
+        loans = (await session.execute(
+            select(Loan).where(Loan.customer_id == customer.id)
+        )).scalars().all()
+
+        for month in range(6):
+            booked = now - timedelta(days=30 * month + rng.randint(0, 2))
+            session.add(Transaction(
+                reference=f"SAL{booked:%Y%m}{rng.randint(100000, 999999)}",
+                account_id=account.id, customer_id=customer.id, booked_at=booked,
+                amount=salary, currency="INR", direction="credit", channel="neft",
+                category="salary", description="Salary credit",
+                counterparty_name="Employer Payroll", country="IND",
+            ))
+            created += 1
+            for loan in loans:
+                # A delinquent loan stops paying; that is what makes it delinquent.
+                if loan.days_past_due > 30 and month < max(1, loan.days_past_due // 30):
+                    continue
+                due = booked + timedelta(days=5)
+                session.add(Transaction(
+                    reference=f"EMI{due:%Y%m}{rng.randint(100000, 999999)}",
+                    account_id=account.id, customer_id=customer.id, booked_at=due,
+                    amount=loan.emi_amount, currency="INR", direction="debit", channel="ach",
+                    category="loan_repayment", description=f"EMI {loan.loan_number}",
+                    counterparty_name="FinOps Bank", country="IND",
+                ))
+                created += 1
+    await session.flush()
+    return created
+
+
+#: Application profiles chosen so underwriting has a clean approve, a thin file, a
+#: high-FOIR case and a policy knockout to work with.
+#: Days past due assigned to the reserved customers, one per collections bucket.
+_DELINQUENCY_SPREAD = [12, 40, 75, 130, 220]
+
+#: Where that band starts. It sits immediately after the credit applicants.
+_DELINQUENCY_BAND_START = 5
+
+_APPLICATION_PROFILES = [
+    {"product": "personal_loan", "amount": 800_000, "tenure": 60, "income": 145_000,
+     "expenses": 42_000, "employment": "salaried", "months": 96, "score": 782,
+     "dpd": 0, "enquiries": 1, "utilisation": 18.0, "purpose": "Home renovation"},
+    {"product": "auto_loan", "amount": 1_200_000, "tenure": 60, "income": 190_000,
+     "expenses": 55_000, "employment": "salaried", "months": 54, "score": 741,
+     "dpd": 0, "enquiries": 2, "utilisation": 31.0, "purpose": "Vehicle purchase",
+     "collateral_type": "vehicle", "collateral_value": 1_500_000},
+    {"product": "personal_loan", "amount": 2_000_000, "tenure": 72, "income": 78_000,
+     "expenses": 38_000, "employment": "self_employed", "months": 20, "score": 668,
+     "dpd": 35, "enquiries": 7, "utilisation": 88.0, "purpose": "Business working capital"},
+    {"product": "personal_loan", "amount": 450_000, "tenure": 48, "income": 61_000,
+     "expenses": 26_000, "employment": "salaried", "months": 8, "score": 596,
+     "dpd": 75, "enquiries": 9, "utilisation": 94.0, "purpose": "Debt consolidation",
+     "write_offs": 1},
+    {"product": "home_loan", "amount": 5_500_000, "tenure": 240, "income": 320_000,
+     "expenses": 90_000, "employment": "professional", "months": 132, "score": 806,
+     "dpd": 0, "enquiries": 1, "utilisation": 9.0, "purpose": "Property purchase",
+     "collateral_type": "residential_property", "collateral_value": 7_500_000},
+]
+
+
+async def _seed_credit_book(session: AsyncSession, customers: list[Customer],
+                            rng: random.Random, now: datetime) -> dict[str, Any]:
+    """Bureau records for everyone, and a spread of applications to underwrite."""
+    applicant_ids = {
+        customers[index].id
+        for index in range(min(len(_APPLICATION_PROFILES), len(customers)))
+    }
+
+    bureau = 0
+    for customer in customers:
+        if customer.id in applicant_ids:
+            continue   # seeded below from the application profile
+        base = rng.choices([790, 745, 705, 660, 610], [0.22, 0.28, 0.24, 0.16, 0.10])[0]
+        score = max(300, min(900, base + rng.randint(-25, 25)))
+        worst_dpd = 0 if score >= 720 else rng.choice([0, 15, 35, 65, 95])
+        session.add(BureauRecord(
+            customer_id=customer.id, bureau="CIBIL", score=score,
+            accounts_total=rng.randint(2, 11), accounts_open=rng.randint(1, 7),
+            accounts_delinquent=1 if worst_dpd >= 30 else 0,
+            worst_dpd_24m=worst_dpd, enquiries_6m=rng.randint(0, 8),
+            oldest_account_months=rng.randint(14, 190),
+            total_outstanding=round(rng.uniform(50_000, 2_400_000), 2),
+            total_sanctioned=round(rng.uniform(200_000, 4_000_000), 2),
+            revolving_utilisation_pct=round(rng.uniform(3, 95), 2),
+            monthly_obligations=round(rng.uniform(0, 60_000), 2),
+            write_offs=1 if score < 620 and rng.random() < 0.4 else 0,
+            settled_accounts=1 if score < 650 and rng.random() < 0.3 else 0,
+            pulled_at=now - timedelta(days=rng.randint(1, 20)),
+            reference=f"CIBIL-{rng.randint(10**9, 10**10 - 1)}", source="database",
+        ))
+        bureau += 1
+
+    applications = 0
+    for index, profile in enumerate(_APPLICATION_PROFILES):
+        if index >= len(customers):
+            break
+        customer = customers[index]
+        # An application is only accepted from a verified customer.
+        customer.kyc_status = "verified"
+        customer.date_of_birth = date(1985 + index, 4, 12)
+        session.add(BureauRecord(
+            customer_id=customer.id, bureau="CIBIL", score=profile["score"],
+            accounts_total=rng.randint(3, 9), accounts_open=rng.randint(2, 6),
+            accounts_delinquent=1 if profile["dpd"] >= 30 else 0,
+            worst_dpd_24m=profile["dpd"], enquiries_6m=profile["enquiries"],
+            oldest_account_months=max(12, profile["months"]),
+            total_outstanding=round(profile["income"] * 6, 2),
+            total_sanctioned=round(profile["income"] * 12, 2),
+            revolving_utilisation_pct=profile["utilisation"],
+            monthly_obligations=round(profile["income"] * 0.12, 2),
+            write_offs=profile.get("write_offs", 0),
+            pulled_at=now - timedelta(days=rng.randint(1, 12)),
+            reference=f"CIBIL-{rng.randint(10**9, 10**10 - 1)}", source="database",
+        ))
+        bureau += 1
+        session.add(CreditApplication(
+            application_number=f"APP-{100001 + index}",
+            customer_id=customer.id, product=profile["product"],
+            requested_amount=float(profile["amount"]), tenure_months=profile["tenure"],
+            purpose=profile["purpose"],
+            declared_monthly_income=float(profile["income"]),
+            declared_monthly_expenses=float(profile["expenses"]),
+            employment_type=profile["employment"], employment_months=profile["months"],
+            collateral_type=profile.get("collateral_type"),
+            collateral_value=float(profile.get("collateral_value", 0)),
+            channel="branch", status="submitted",
+            submitted_at=now - timedelta(days=rng.randint(0, 6)),
+        ))
+        applications += 1
+
+    await session.flush()
+    return {"bureau_records": bureau, "credit_applications": applications}
+
+
+async def _seed_collections_book(session: AsyncSession, customers: list[Customer],
+                                 now: datetime) -> dict[str, Any]:
+    """Open a case for every delinquent loan, with a spread of the controls that
+    constrain treatment: a cease-contact instruction, an open dispute, a withdrawn
+    consent."""
+    from app.tools.collections import asset_classification, bucket_for_dpd
+
+    loans = (await session.execute(
+        select(Loan).where(Loan.days_past_due > 0).order_by(Loan.days_past_due.desc())
+    )).scalars().all()
+
+    cases = 0
+    # Scarcest controls first: a small seeded book must still exercise each one.
+    controls = ["", "cease", "dispute", "no_consent", ""]
+    for index, loan in enumerate(loans):
+        classification = asset_classification(loan.days_past_due)
+        control = controls[index % len(controls)]
+        case = DelinquencyCase(
+            case_number=f"COL-{100001 + index}",
+            customer_id=loan.customer_id, facility_type="loan", facility_id=loan.id,
+            facility_reference=loan.loan_number, outstanding=loan.outstanding,
+            amount_overdue=round(loan.emi_amount * max(1, loan.days_past_due // 30), 2),
+            minimum_due=loan.emi_amount, days_past_due=loan.days_past_due,
+            bucket=bucket_for_dpd(loan.days_past_due),
+            asset_classification=classification["classification"],
+            status="open",
+            contact_consent=control != "no_consent",
+            cease_contact=control == "cease",
+            dispute_open=control == "dispute",
+            opened_at=now - timedelta(days=min(loan.days_past_due, 90)),
+        )
+        session.add(case)
+        cases += 1
+
+    await session.flush()
+    return {"delinquency_cases": cases}

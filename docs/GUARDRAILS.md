@@ -2,7 +2,8 @@
 
 Two layers protect every run: the engine's own deterministic rules, and
 [NVIDIA NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) rail configurations for
-the two production agents on the Execute board.
+the production agents whose mistakes carry regulatory consequences — Customer Service, AML
+Investigation, Credit Risk and Collections.
 
 ```
 request ──▶ input_rails ──▶ planner ─▶ retriever ─▶ memory ─▶ LLM ⇄ tools
@@ -45,6 +46,35 @@ reviewed, diffed and versioned like any other policy artefact.
 
 **Tipping off** is a criminal offence in most jurisdictions — PMLA s.63 in India, POCA
 s.333A in the UK — which is why it blocks outright rather than being redacted.
+
+### Credit Risk
+
+| Side | Rail | Blocks |
+|---|---|---|
+| input | `banking prompt integrity` | Injection and control bypass |
+| input | `fair lending` | Any request to weigh age beyond the policy limits, sex, marital status, pregnancy, religion, caste, race, ethnicity, disability, nationality or the applicant's neighbourhood — and redlining language |
+| input | `self check input` | Model-judged: approving over a knockout, hiding a decline reason, recording a decision without running the models |
+| output | `fair lending output` | The same characteristics appearing as a *reason* in the recommendation |
+| output | `sensitive disclosure` | Identifier masking |
+| output | `self check output` | Model-judged: a decline without actionable reason codes, a figure no tool produced, a recommendation presented as a decision |
+
+The prohibited characteristics are those named in the Equal Credit Opportunity Act
+s.701(a), the RBI Fair Practices Code and Article 15 of the Indian Constitution.
+
+### Collections
+
+| Side | Rail | Blocks |
+|---|---|---|
+| input | `banking prompt integrity` | Injection and control bypass |
+| input | `collections control bypass` | Any request to contact someone despite a cease instruction, withdrawn consent, open dispute or hardship arrangement, or outside permitted hours |
+| input | `collections conduct` | Threats of arrest, criminal proceedings or public disclosure; contacting an employer, relative, neighbour or other third party about the debt |
+| input | `self check input` | Model-judged equivalents, including pressing for more than the assessed surplus |
+| output | `collections conduct output` | The same conduct appearing in the answer |
+| output | `sensitive disclosure` | Identifier masking |
+| output | `self check output` | Model-judged: a suppressed action, an unaffordable instalment, a coercive tone, a figure no tool produced |
+
+These are the RBI Fair Practices Code rules for lenders' recovery agents, and their FDCPA
+s.806–807 equivalents.
 
 Agents with no configuration under `configs/` are unaffected: the rail node reports itself
 skipped and the run proceeds.

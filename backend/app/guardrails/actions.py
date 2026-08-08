@@ -17,9 +17,12 @@ from typing import Any
 
 from app.core.logging import get_logger
 from app.guardrails.patterns import (
+    COLLECTIONS_BYPASS_PATTERNS,
+    COLLECTIONS_THREAT_PATTERNS,
     CONTROL_BYPASS_PATTERNS,
     EVASION_PATTERNS,
     PII_PATTERNS,
+    PROHIBITED_CREDIT_FACTORS,
     PROMPT_INJECTION_PATTERNS,
     TIPPING_OFF_OUTPUT_PATTERNS,
     TIPPING_OFF_PATTERNS,
@@ -59,6 +62,9 @@ SEVERITY = {
     "tipping_off_request": "critical",
     "tipping_off": "critical",
     "sensitive_disclosure": "medium",
+    "prohibited_credit_factor": "critical",
+    "collections_threat": "critical",
+    "collections_control_bypass": "critical",
 }
 
 
@@ -141,6 +147,33 @@ async def sensitive_labels(context: dict[str, Any] | None = None) -> str | None:
     return f"sensitive_disclosure|{','.join(found)}" if found else None
 
 
+async def check_prohibited_credit_factors(context: dict[str, Any] | None = None) -> str | None:
+    """A credit decision may never turn on a protected characteristic.
+
+    Checks both sides: a request to weigh one, and an answer that reasons from one.
+    """
+    for key in ("user_message", "bot_message"):
+        hit = first_match(PROHIBITED_CREDIT_FACTORS, _text(context, key))
+        if hit:
+            return f"prohibited_credit_factor|{hit}"
+    return None
+
+
+async def check_collections_conduct(context: dict[str, Any] | None = None) -> str | None:
+    """Threats, third-party disclosure and pressure tactics a collector may never use."""
+    for key in ("user_message", "bot_message"):
+        hit = first_match(COLLECTIONS_THREAT_PATTERNS, _text(context, key))
+        if hit:
+            return f"collections_threat|{hit}"
+    return None
+
+
+async def check_collections_control_bypass(context: dict[str, Any] | None = None) -> str | None:
+    """Requests to contact someone despite a cease instruction, dispute or hardship plan."""
+    hit = first_match(COLLECTIONS_BYPASS_PATTERNS, _text(context, "user_message"))
+    return f"collections_control_bypass|{hit}" if hit else None
+
+
 #: Detectors return a hit string or None. Every one is wrapped in `fail_closed` when it is
 #: registered, so a detector added later cannot accidentally fail open.
 DETECTORS = {
@@ -149,6 +182,9 @@ DETECTORS = {
     "check_financial_crime_request": check_financial_crime_request,
     "check_tipping_off": check_tipping_off,
     "sensitive_labels": sensitive_labels,
+    "check_prohibited_credit_factors": check_prohibited_credit_factors,
+    "check_collections_conduct": check_collections_conduct,
+    "check_collections_control_bypass": check_collections_control_bypass,
 }
 
 #: Transforms rewrite the message, so they must never return an error string as text and

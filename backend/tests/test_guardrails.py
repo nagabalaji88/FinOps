@@ -21,17 +21,30 @@ pytestmark = pytest.mark.anyio
 
 CUSTOMER_SERVICE = "customer_service"
 AML = "aml_investigation"
+CREDIT = "credit_risk"
+COLLECTIONS = "collections"
+
+#: Every agent that ships with a rail configuration. Adding an agent here means adding its
+#: rails; the tests below assert the configuration is complete and that it is enforced.
+RAILED_AGENTS = (CUSTOMER_SERVICE, AML, CREDIT, COLLECTIONS)
 
 
 class TestRailConfiguration:
-    async def test_both_production_agents_have_rail_configs(self):
-        assert set(rails.configured_agents()) == {CUSTOMER_SERVICE, AML}
-        for agent in (CUSTOMER_SERVICE, AML):
+    async def test_every_railed_agent_has_a_config(self):
+        assert set(rails.configured_agents()) == set(RAILED_AGENTS)
+        for agent in RAILED_AGENTS:
             assert rails.covers(agent)
+
+    async def test_only_implemented_agents_carry_rails(self):
+        """A rail on a roadmap agent would be a control nothing can exercise."""
+        from app.agents.registry import IMPLEMENTED
+
+        implemented = {spec.key for spec in IMPLEMENTED}
+        assert set(rails.configured_agents()) <= implemented
 
     async def test_configs_are_complete_nemo_projects(self):
         root = Path(__file__).resolve().parents[1] / "app" / "guardrails" / "configs"
-        for agent in (CUSTOMER_SERVICE, AML):
+        for agent in RAILED_AGENTS:
             for filename in ("config.yml", "rails.co", "prompts.yml"):
                 assert (root / agent / filename).is_file(), f"{agent}/{filename} missing"
 
@@ -47,7 +60,7 @@ class TestRailConfiguration:
         assert status["name"] == "nemo_guardrails"
         assert status["installed"] is True
         assert status["status"] == "configured"
-        assert set(status["agents"]) == {CUSTOMER_SERVICE, AML}
+        assert set(status["agents"]) == set(RAILED_AGENTS)
         # The suite runs deterministic rails only; the status must say so rather than
         # implying the self-check rails are active.
         assert status["llm_backed_rails"] is False
@@ -266,4 +279,4 @@ class TestEngineIntegration:
         entry = next(s for s in services if s["name"] == "nemo_guardrails")
         assert entry["category"] == "guardrails"
         assert entry["status"] == "configured"
-        assert set(entry["agents"]) == {CUSTOMER_SERVICE, AML}
+        assert set(entry["agents"]) == set(RAILED_AGENTS)

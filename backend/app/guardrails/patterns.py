@@ -79,6 +79,52 @@ TIPPING_OFF_OUTPUT_PATTERNS = [
 ]
 
 
+# Characteristics that must never enter a credit decision. Equal Credit Opportunity Act
+# s.701(a) in the US, the RBI Fair Practices Code and Article 15 of the Indian Constitution
+# all prohibit them; a lender that reasons from any of these is discriminating.
+PROHIBITED_CREDIT_FACTORS = [
+    re.compile(r"\b(because|since|as|due to|given)\b.{0,40}\b(she|he) is\b.{0,20}"
+               r"\b(married|single|divorced|widow(ed)?|pregnant|old|young|female|male)\b", re.I),
+    re.compile(r"\b(decline|reject|refuse|approve|lower the limit|higher rate)\b.{0,60}"
+               r"\b(because|due to|on account of)\b.{0,40}"
+               r"\b(caste|religion|race|ethnic|gender|sex|marital status|pregnan|disab|"
+               r"nationality|region|postcode|pin ?code|neighbourhood)\b", re.I),
+    re.compile(r"\b(caste|religion|race|ethnicity|gender|sex|marital status|"
+               r"sexual orientation|disability)\b.{0,30}\b(risk|score|factor|weight|"
+               r"consideration|criteri)", re.I),
+    re.compile(r"\bredlin(e|ing)\b", re.I),
+]
+
+# Threats and pressure tactics a collector may never use. RBI Fair Practices Code for
+# recovery agents, and the FDCPA s.806-807 equivalents.
+COLLECTIONS_THREAT_PATTERNS = [
+    # "arrested", "jailed", "prosecuted" — the threat is the same whatever the inflection,
+    # and it can be phrased about the customer in the third person.
+    re.compile(r"\b(arrest|jail|imprison|prosecut|incarcerat)\w*\b", re.I),
+    re.compile(r"\b(criminal (case|charge|charges|proceedings|action)|non-?bailable|"
+               r"warrant)\b", re.I),
+    re.compile(r"\b(tell|inform|contact|call|visit|speak to|notify|reach out to)\b.{0,40}"
+               r"\b(your|their|his|her|the)\s+"
+               r"(employer|boss|manager|family|relatives?|neighbours?|neighbors?|friends?|"
+               r"colleagues?|hr\b)", re.I),
+    re.compile(r"\b(seize|confiscate|repossess)\b.{0,30}\b(today|immediately|now|"
+               r"within \d+ hours?)\b", re.I),
+    re.compile(r"\b(publish|post|share)\b.{0,30}\b(your name|your photo|defaulter list|"
+               r"social media)\b", re.I),
+    re.compile(r"\byou (have no|don'?t have a) (choice|option)\b", re.I),
+]
+
+# Attempts to get the agent to work around a control rather than respect it.
+COLLECTIONS_BYPASS_PATTERNS = [
+    re.compile(r"\b(ignore|override|bypass|work around|get around)\b.{0,40}"
+               r"\b(cease|consent|dispute|hardship|do.?not.?call|dnc)\b", re.I),
+    re.compile(r"\b(call|contact|visit)\b.{0,40}\b(anyway|regardless|even though)\b"
+               r".{0,40}\b(cease|consent|dispute|hardship|asked us to stop)\b", re.I),
+    re.compile(r"\b(outside|after|before)\b.{0,20}\b(permitted|allowed|legal)\b.{0,20}"
+               r"\bhours?\b", re.I),
+]
+
+
 def mask(value: str) -> str:
     """Leave the last four characters legible; a servicing agent needs that much."""
     digits = re.sub(r"\D", "", value)

@@ -65,11 +65,16 @@ class TestCatalogueApi:
         agents = response.json()
         implemented = [a for a in agents if a["availability"] == "implemented"]
         coming_soon = [a for a in agents if a["availability"] == "coming_soon"]
-        assert len(implemented) >= 5
-        assert len(coming_soon) >= 10
+        # The catalogue is fifteen agents; the split moves as roadmap agents are built.
+        assert len(implemented) + len(coming_soon) == 15
+        assert len(implemented) >= 7
         keys = {a["key"] for a in implemented}
         assert {"customer_service", "kyc_onboarding", "aml_investigation",
-                "investment_research", "knowledge_assistant"} <= keys
+                "investment_research", "knowledge_assistant",
+                "credit_risk", "collections"} <= keys
+        # Whatever is still on the roadmap must refuse to execute, not half-work.
+        for agent in coming_soon:
+            assert agent["lifecycle_state"] == "disabled"
 
     async def test_roadmap_agent_cannot_execute(self, client: AsyncClient, auth: dict):
         response = await client.post("/api/v1/agents/trading/execute", headers=auth,

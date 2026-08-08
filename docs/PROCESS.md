@@ -10,6 +10,8 @@ risk — not only for engineers.
 - [AML Fraud Investigation](#3-aml-fraud-investigation-agent)
 - [Investment Research](#4-investment-research-agent)
 - [Internal Knowledge Assistant](#5-internal-knowledge-assistant)
+- [Credit Risk](#6-credit-risk-agent)
+- [Collections](#7-collections-agent)
 - [Cross-agent summary](#cross-agent-summary)
 
 ---
@@ -392,6 +394,101 @@ run: **under 45 seconds, capped at $1.50.**
 
 ---
 
+## 6. Credit Risk Agent
+
+**Owner:** Credit Risk · **Department:** Risk · **Gate:** recording the decision
+
+Underwrites a retail credit application and recommends a decision. It never decides: a
+credit officer does, through the approval gate.
+
+### The process
+
+| # | Step | Tool | What comes out |
+|---|---|---|---|
+| 1 | Read the case | `get_credit_application` | Application, applicant, existing exposure across loans and cards |
+| 2 | Bureau | `pull_credit_bureau` | Score, delinquency history, enquiries, utilisation — and the age of the pull. A missing or stale pull stops the assessment |
+| 3 | Affordability | `assess_affordability` | FOIR against income **verified from the customer's own salary credits**, with the variance to what was declared |
+| 4 | Score | `score_credit_risk` | Application score, probability of default, grade, and every characteristic's contribution |
+| 5 | Severity of loss | `estimate_loss_given_default` | LGD after collateral haircuts |
+| 6 | Capital | `calculate_expected_loss` | Expected loss and Basel III IRB risk-weighted assets |
+| 7 | Price | `price_facility` | The rate, built up from cost of funds, opex, expected loss and the capital charge |
+| 8 | Policy | `check_credit_policy` | The hard rules, each pass or fail with its detail |
+| 9 | Limit | `recommend_limit` | The sanctionable amount and the constraint that binds it |
+| 10 | Decide | `record_credit_decision` | **Suspends for a credit officer.** Records the decision with every model input |
+
+### Where a human decides
+
+`record_credit_decision` always suspends. The reviewer sees the recommendation, the
+sanctioned amount, the rate, the grade, the PD, the expected loss, the FOIR and the reason
+codes before deciding.
+
+### What the agent will not do
+
+- Approve over a policy knockout. Age at maturity, KYC status, sanctions flag, tenure,
+  minimum bureau score, FOIR cap and unsecured exposure cap are final.
+- Decline without reason codes the applicant can act on — the tool refuses it.
+- Reason from age beyond the policy limits, sex, marital status, pregnancy, religion,
+  caste, race, ethnicity, disability, nationality or the applicant's neighbourhood. The
+  fair-lending rails refuse the request and the answer.
+- State a score, rate or limit that no model produced.
+
+### What comes out
+
+A recommendation with the sanctioned amount, rate, instalment, grade, PD, expected loss,
+FOIR, reason codes, conditions, and the policy and model versions behind it.
+
+---
+
+## 7. Collections Agent
+
+**Owner:** Collections · **Department:** Retail Banking · **Gates:** repayment plan,
+recovery referral
+
+Works past-due accounts inside the RBI Fair Practices Code. It never contacts anyone: it
+decides, records and schedules, and the channel systems deliver.
+
+### The process
+
+| # | Step | Tool | What comes out |
+|---|---|---|---|
+| 1 | Find the work | `scan_delinquent_accounts` | Loans and cards in arrears, classified, with cases opened for anything uncovered |
+| 2 | Read the case | `get_delinquency_case` | Position, controls, contact history, promises |
+| 3 | Position | `calculate_arrears` | Days past due, bucket, RBI classification, provisioning, roll-rate risk |
+| 4 | Likelihood | `score_collectability` | Recovery likelihood from this customer's behaviour, with any component that has no evidence omitted rather than guessed |
+| 5 | Strategy | `recommend_treatment` | The ladder for the bucket, minus everything the account's controls forbid |
+| 6 | May we contact? | `check_contact_eligibility` | Consent, cease-contact, dispute, permitted hours in local time, frequency caps — and when contact next becomes permissible |
+| 7 | Difficulty | `assess_hardship` | Affordable surplus after a reserve the customer keeps |
+| 8 | Record | `log_contact_attempt`, `record_promise_to_pay`, `evaluate_promise_performance` | The audit trail, and whether promises were kept |
+| 9 | Restructure | `create_repayment_plan` | **Suspends for approval.** Refuses any instalment above the assessed surplus |
+| 10 | Recover | `escalate_to_recovery` | **Suspends for approval.** Refuses while a dispute, hardship plan or cease instruction is live |
+
+### Where a human decides
+
+Both `create_repayment_plan` and `escalate_to_recovery` suspend. Recovery is a critical-risk
+gate: it changes the customer's legal position.
+
+### What the agent will not do
+
+- Contact anyone outside 08:00–19:00 **local** time, more than once a day, or more than
+  three times a week.
+- Contact anyone at all who has issued a cease instruction or withdrawn consent. There is
+  no "later" for a cease instruction.
+- Do anything but write to a customer with an open dispute.
+- Refer to recovery a customer in a hardship arrangement, with an open dispute, or whose
+  account is not yet non-performing.
+- Propose an instalment the assessed surplus cannot support. Where nothing is affordable it
+  says so and refers for concession or settlement review.
+- Threaten arrest, criminal proceedings, seizure without process or public disclosure, or
+  suggest contacting an employer, relative or neighbour. The conduct rails refuse the
+  request and the answer.
+
+### What comes out
+
+The bucket and RBI classification, the arrears and provision, the recommended next action,
+why, and any control that limited the options.
+
+---
+
 ## Cross-agent summary
 
 ### Where a human decides
@@ -403,6 +500,8 @@ run: **under 45 seconds, capped at $1.50.**
 | AML Investigation | `generate_sar`, `close_investigation_case` (medium risk and above) | Approver / MLRO | A regulatory filing and its disposition |
 | Investment Research | `publish_research_note` | Approver | Client-facing material |
 | Knowledge Assistant | — | — | Read-only |
+| Credit Risk | `record_credit_decision` | Approver / credit officer | A regulated lending decision |
+| Collections | `create_repayment_plan`, `escalate_to_recovery` | Approver | A concession, and a change to the customer's legal position |
 
 Segregation of duties is enforced: the requester cannot approve their own request, and the
 decider must hold the required role. Every decision, with reviewer and comments, lands on
@@ -450,3 +549,9 @@ Each workflow above is covered by the conformance suite: four scenarios per agen
 exercising the happy path, a security control, a governance gate and a negative case. Run
 `python -m app.cli validate` to check the behaviour described here still holds. See
 [`VALIDATION.md`](VALIDATION.md).
+
+The Credit Risk and Collections models and controls are additionally covered by
+`backend/tests/test_credit_collections.py`, which tests them against the published rules —
+the amortisation formula, the Basel III IRB capital function, the RBI classification ladder
+and the Fair Practices Code contact window. See
+[`CREDIT_AND_COLLECTIONS.md`](CREDIT_AND_COLLECTIONS.md).

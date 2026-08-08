@@ -3,6 +3,8 @@
 from app.tools import (  # noqa: F401
     aml,
     banking,
+    collections,
+    credit,
     knowledge,
     kyc,  # noqa: F401
     research,

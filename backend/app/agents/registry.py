@@ -336,22 +336,191 @@ Answering protocol:
     example_input={"query": "What is our incident severity classification and who declares a Sev-1?"},
 )
 
+
+# --------------------------------------------------------------------------- #
+# 6. Credit Risk                                                               #
+# --------------------------------------------------------------------------- #
+CREDIT_RISK = AgentSpec(
+    key="credit_risk",
+    name="Credit Risk Agent",
+    description="Underwrites credit applications end to end: bureau, affordability, scorecard "
+                "PD, LGD, Basel IRB capital, risk-based pricing, policy knockouts and a "
+                "reasoned recommendation for a human credit officer.",
+    category="Risk",
+    system_prompt="""You are the Credit Risk Agent for FinOps Bank. You underwrite retail credit
+applications to the bank's credit policy and to Basel III standards. You produce a
+recommendation; a human credit officer makes the decision.
+
+Mandatory sequence for every application:
+1. `get_credit_application` - read the application, the applicant and their existing exposure.
+2. `pull_credit_bureau` - read the bureau record. If none exists, or the pull is stale, say so
+   and stop: an application cannot be underwritten without a current bureau view.
+3. `assess_affordability` - compute FOIR against verified income. Where verified income differs
+   from declared income by more than 15%, state the variance and use the verified figure.
+4. `score_credit_risk` - run the scorecard, passing the FOIR you just computed.
+5. `estimate_loss_given_default`, then `calculate_expected_loss` - EL and IRB capital.
+6. `price_facility` - the risk-based rate.
+7. `check_credit_policy` - the hard rules.
+8. `recommend_limit` - the sanctionable amount.
+9. `record_credit_decision` - only when you have all of the above. This suspends for approval.
+
+Rules that are not negotiable:
+- A POLICY KNOCKOUT IS FINAL. If `check_credit_policy` fails any rule, the recommendation is
+  decline or refer, whatever the score says. Never recommend approval over a knockout.
+- NEVER INVENT A NUMBER. Every figure - score, PD, FOIR, rate, instalment, limit - must come
+  from a tool result in this conversation. If a tool could not run, say what is missing.
+- A DECLINE MUST CARRY REASON CODES drawn from the scorecard contributions and the failed
+  policy rules, in the order of their impact. The applicant is entitled to know why.
+- NEVER use age, sex, marital status, religion, caste, ethnicity, disability or postcode as a
+  reason for a decision. Assess capacity and credit history only. If asked to weigh any such
+  characteristic, refuse and explain that it is prohibited.
+- State the model and policy version behind the recommendation.
+- Where the recommended amount is below the requested amount, name the binding constraint.
+
+Close with: recommendation, sanctioned amount, rate, instalment, grade, PD, expected loss,
+FOIR, reason codes and conditions.""",
+    tools=[
+        "get_credit_application",
+        "pull_credit_bureau",
+        "assess_affordability",
+        "score_credit_risk",
+        "estimate_loss_given_default",
+        "calculate_expected_loss",
+        "price_facility",
+        "check_credit_policy",
+        "recommend_limit",
+        "evaluate_covenants",
+        "record_credit_decision",
+        "summarise_credit_portfolio",
+        "search_knowledge_base",
+    ],
+    knowledge_sources=["banking_policies", "product_catalogue"],
+    temperature=0.1,
+    max_iterations=14,
+    memory_enabled=False,
+    mask_pii=True,
+    strict_validation=True,
+    final_approval_required=True,
+    final_approval_risk_threshold="high",
+    approval_role="approver",
+    output_schema=["recommendation", "reason_codes"],
+    cost_cap_usd=2.5,
+    sla_latency_ms=90_000,
+    owner="Credit Risk",
+    owner_email="credit.risk@finops.local",
+    department="Risk",
+    tags=["credit", "underwriting", "basel", "regulated"],
+    input_schema={
+        "query": {"type": "string", "required": True, "label": "Underwriting instruction"},
+        "application": {"type": "string", "required": False,
+                        "label": "Application number"},
+        "customer_id": {"type": "string", "required": False, "label": "Customer id"},
+    },
+    example_input={
+        "query": "Underwrite this application and recommend a decision with reason codes.",
+        "application": "APP-100001",
+    },
+)
+
+# --------------------------------------------------------------------------- #
+# 7. Collections                                                               #
+# --------------------------------------------------------------------------- #
+COLLECTIONS = AgentSpec(
+    key="collections",
+    name="Collections Agent",
+    description="Works delinquent accounts within the Fair Practices Code: arrears and RBI asset "
+                "classification, collectability scoring, contact eligibility, hardship "
+                "assessment, promises to pay and restructuring.",
+    category="Retail Banking",
+    system_prompt="""You are the Collections Agent for FinOps Bank. You work past-due accounts
+inside the RBI Fair Practices Code. You never contact anybody yourself: you decide, record and
+schedule, and the channel systems deliver.
+
+For a case, work in this order:
+1. `get_delinquency_case` then `calculate_arrears` - the live position, bucket, RBI asset
+   classification and provisioning.
+2. `score_collectability` - the likelihood of recovery from this customer's own behaviour.
+3. `recommend_treatment` - the actions this bucket permits, minus anything the account's
+   controls forbid.
+4. `check_contact_eligibility` before proposing any outreach.
+5. Where the customer is in difficulty, `assess_hardship` before any plan.
+
+Rules that are not negotiable:
+- CONTROLS OVERRIDE STRATEGY. A cease-contact instruction, a withdrawn consent, an open
+  dispute or a live hardship arrangement suppress actions no matter what the bucket allows or
+  how large the arrears are. Never propose a suppressed action, and never suggest a workaround.
+- NEVER PROPOSE AN UNAFFORDABLE PLAN. `create_repayment_plan` refuses an instalment above the
+  assessed surplus. If nothing is affordable, say so and refer for concession or settlement
+  review. An unaffordable plan is a worse outcome than no plan.
+- NEVER THREATEN. No arrest, no criminal proceedings, no contacting an employer, relative or
+  neighbour, no public shaming, no misrepresentation of legal consequence. State only what the
+  bank will actually do and is entitled to do.
+- NEVER STATE A FIGURE YOU DID NOT READ FROM A TOOL. Arrears, DPD, balances, provisions and
+  scores all come from tool results.
+- Escalation to recovery requires the account to be non-performing and no dispute, hardship
+  plan or cease-contact instruction in force. `escalate_to_recovery` enforces this; do not
+  argue with it.
+- Be factual and neutral. The customer is in difficulty, not in the wrong.
+
+Close with: bucket and classification, arrears, the recommended next action, why, and any
+control that limited your options.""",
+    tools=[
+        "scan_delinquent_accounts",
+        "get_delinquency_case",
+        "calculate_arrears",
+        "score_collectability",
+        "recommend_treatment",
+        "check_contact_eligibility",
+        "assess_hardship",
+        "log_contact_attempt",
+        "record_promise_to_pay",
+        "evaluate_promise_performance",
+        "create_repayment_plan",
+        "escalate_to_recovery",
+        "collections_portfolio_summary",
+        "search_knowledge_base",
+    ],
+    knowledge_sources=["banking_policies"],
+    temperature=0.15,
+    max_iterations=14,
+    memory_enabled=True,
+    memory_window=10,
+    mask_pii=True,
+    strict_validation=True,
+    final_approval_required=True,
+    final_approval_risk_threshold="high",
+    approval_role="approver",
+    cost_cap_usd=2.0,
+    sla_latency_ms=75_000,
+    owner="Collections",
+    owner_email="collections@finops.local",
+    department="Retail Banking",
+    tags=["collections", "delinquency", "hardship", "regulated"],
+    input_schema={
+        "query": {"type": "string", "required": True, "label": "Collections instruction"},
+        "case": {"type": "string", "required": False, "label": "Case number"},
+        "customer_id": {"type": "string", "required": False, "label": "Customer id"},
+    },
+    example_input={
+        "query": "Review this case, classify the arrears and recommend the next action.",
+        "case": "COL-100001",
+    },
+)
+
 IMPLEMENTED: list[AgentSpec] = [
     CUSTOMER_SERVICE,
     KYC_ONBOARDING,
     AML_INVESTIGATION,
     INVESTMENT_RESEARCH,
     KNOWLEDGE_ASSISTANT,
+    CREDIT_RISK,
+    COLLECTIONS,
 ]
 
 # --------------------------------------------------------------------------- #
 # Roadmap agents - registered, listed in the UI, explicitly not executable      #
 # --------------------------------------------------------------------------- #
 ROADMAP: list[dict[str, Any]] = [
-    {"key": "credit_risk", "name": "Credit Risk Agent", "category": "Risk",
-     "description": "Underwriting decisions, PD/LGD modelling, limit setting and covenant "
-                    "monitoring.",
-     "owner": "Credit Risk", "department": "Risk", "planned_quarter": "Q3 2026"},
     {"key": "trading", "name": "Trading Agent", "category": "Markets",
      "description": "Execution strategy selection, TCA and pre-trade compliance checks.",
      "owner": "Markets Technology", "department": "Global Markets", "planned_quarter": "Q4 2026"},
@@ -375,10 +544,6 @@ ROADMAP: list[dict[str, Any]] = [
      "description": "Payment investigation, repair, sanctions hit resolution and returns "
                     "handling.",
      "owner": "Payment Operations", "department": "Operations", "planned_quarter": "Q4 2026"},
-    {"key": "collections", "name": "Collections Agent", "category": "Retail Banking",
-     "description": "Delinquency outreach sequencing, hardship assessment and promise-to-pay "
-                    "tracking.",
-     "owner": "Collections", "department": "Retail Banking", "planned_quarter": "Q1 2027"},
     {"key": "risk_management", "name": "Risk Management Agent", "category": "Risk",
      "description": "Enterprise risk aggregation, scenario analysis and limit breach escalation.",
      "owner": "Enterprise Risk", "department": "Risk", "planned_quarter": "Q2 2027"},

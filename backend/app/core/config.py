@@ -133,6 +133,11 @@ class Settings(BaseSettings):
     # Run the LLM-backed self-check rails. They are also removed automatically when no
     # provider is configured; set this false to run deterministic rails only.
     nemo_llm_rails_enabled: bool = True
+
+    # --- Operating locale ----------------------------------------------------
+    # Regulated contact windows (for example the Fair Practices Code 08:00-19:00 rule for
+    # collections) are expressed in the customer's local time, not in UTC.
+    bank_timezone: str = "Asia/Kolkata"
     default_embedding_model: str = "text-embedding-3-small"
     llm_timeout_seconds: int = 120
     llm_max_retries: int = 3

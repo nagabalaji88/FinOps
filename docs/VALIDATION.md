@@ -1,6 +1,6 @@
 # Conformance suite
 
-Twenty inputs across the five implemented agents, and an execution validation agent that
+Twenty inputs across five of the seven implemented agents, and an execution validation agent that
 routes each one to the agent that owns it, runs it for real, acts as the human reviewer
 when a run suspends for approval, and asserts the expected behaviour.
 
@@ -185,6 +185,15 @@ tested (`backend/tests/test_validation.py`, 32 tests):
 - the runner drives real executions end to end against a scripted provider: a correct
   answer passes, **a hallucinated answer is caught**, and the CS-04 approval gate is
   suspended, reviewed, resumed and validated.
+
+## Coverage gap
+
+Credit Risk and Collections are implemented but are **not yet in the twenty**. Their models
+and controls are covered instead by `backend/tests/test_credit_collections.py`, which tests
+them against the published rules directly — the amortisation formula, the Basel III IRB
+capital function, the RBI classification ladder and the Fair Practices Code contact window
+— and by the rail tests in `backend/tests/test_guardrails.py`. Scenario coverage for both
+agents is outstanding work.
 
 ## Extending the suite
 

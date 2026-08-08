@@ -112,7 +112,9 @@ async def _database() -> AsyncIterator[None]:
     telemetry.install()
     async with SessionFactory() as session:
         await bootstrap(session)
-        await seed_sample_banking(session, customers=6)
+        # Enough customers for the credit-application profiles and the delinquency
+        # band that follows them; see _APPLICATION_PROFILES in bootstrap.
+        await seed_sample_banking(session, customers=12)
     yield
     await engine.dispose()
     os.close(_db_fd)

@@ -385,3 +385,185 @@ class ResearchNote(Base, UUIDMixin, TimestampMixin):
     analyst: Mapped[str | None] = mapped_column(String(160), default=None)
     execution_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)
     artifact_uri: Mapped[str | None] = mapped_column(String(1000), default=None)
+
+
+# --- Credit risk ---------------------------------------------------------------
+class CreditApplication(Base, UUIDMixin, TimestampMixin):
+    """A request for credit, as captured by origination."""
+
+    __tablename__ = "credit_applications"
+    __table_args__ = (Index("ix_credit_app_status", "status", "created_at"),)
+
+    application_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"),
+                                             index=True)
+    product: Mapped[str] = mapped_column(String(40), default="personal_loan")
+    requested_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
+    tenure_months: Mapped[int] = mapped_column(Integer, default=60)
+    purpose: Mapped[str | None] = mapped_column(String(200), default=None)
+    # Declared at application and used for affordability; verified separately.
+    declared_monthly_income: Mapped[float] = mapped_column(Float, default=0.0)
+    declared_monthly_expenses: Mapped[float] = mapped_column(Float, default=0.0)
+    employment_type: Mapped[str] = mapped_column(String(32), default="salaried")
+    employment_months: Mapped[int] = mapped_column(Integer, default=0)
+    collateral_type: Mapped[str | None] = mapped_column(String(60), default=None)
+    collateral_value: Mapped[float] = mapped_column(Float, default=0.0)
+    co_applicant_id: Mapped[str | None] = mapped_column(String(36), default=None)
+    channel: Mapped[str] = mapped_column(String(32), default="branch")
+    status: Mapped[str] = mapped_column(String(24), default="submitted", index=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+
+
+class BureauRecord(Base, UUIDMixin, TimestampMixin):
+    """A credit bureau pull. Stored so a decision can always be re-derived."""
+
+    __tablename__ = "bureau_records"
+    __table_args__ = (Index("ix_bureau_customer_time", "customer_id", "pulled_at"),)
+
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"),
+                                             index=True)
+    bureau: Mapped[str] = mapped_column(String(40), default="CIBIL")
+    score: Mapped[int] = mapped_column(Integer, default=0)          # 300-900 (CIBIL scale)
+    score_scale_min: Mapped[int] = mapped_column(Integer, default=300)
+    score_scale_max: Mapped[int] = mapped_column(Integer, default=900)
+    accounts_total: Mapped[int] = mapped_column(Integer, default=0)
+    accounts_open: Mapped[int] = mapped_column(Integer, default=0)
+    accounts_delinquent: Mapped[int] = mapped_column(Integer, default=0)
+    worst_dpd_24m: Mapped[int] = mapped_column(Integer, default=0)
+    enquiries_6m: Mapped[int] = mapped_column(Integer, default=0)
+    oldest_account_months: Mapped[int] = mapped_column(Integer, default=0)
+    total_outstanding: Mapped[float] = mapped_column(Float, default=0.0)
+    total_sanctioned: Mapped[float] = mapped_column(Float, default=0.0)
+    revolving_utilisation_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    monthly_obligations: Mapped[float] = mapped_column(Float, default=0.0)
+    write_offs: Mapped[int] = mapped_column(Integer, default=0)
+    settled_accounts: Mapped[int] = mapped_column(Integer, default=0)
+    pulled_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    reference: Mapped[str | None] = mapped_column(String(64), default=None)
+    source: Mapped[str] = mapped_column(String(24), default="database")
+    raw: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+
+
+class CreditDecision(Base, UUIDMixin, TimestampMixin):
+    """The underwriting outcome, with every input needed to reproduce it."""
+
+    __tablename__ = "credit_decisions"
+
+    application_id: Mapped[str] = mapped_column(
+        ForeignKey("credit_applications.id", ondelete="CASCADE"), index=True)
+    customer_id: Mapped[str] = mapped_column(String(36), index=True)
+    decision: Mapped[str] = mapped_column(String(24), index=True)  # approve|decline|refer
+    approved_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    approved_tenure_months: Mapped[int] = mapped_column(Integer, default=0)
+    approved_rate_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    risk_grade: Mapped[str | None] = mapped_column(String(8), default=None)
+    probability_of_default: Mapped[float] = mapped_column(Float, default=0.0)
+    loss_given_default: Mapped[float] = mapped_column(Float, default=0.0)
+    exposure_at_default: Mapped[float] = mapped_column(Float, default=0.0)
+    expected_loss: Mapped[float] = mapped_column(Float, default=0.0)
+    risk_weighted_assets: Mapped[float] = mapped_column(Float, default=0.0)
+    foir_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    reason_codes: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    conditions: Mapped[list[str]] = mapped_column(JSONType, default=list)
+    policy_version: Mapped[str] = mapped_column(String(24), default="CP-2026.1")
+    model_version: Mapped[str] = mapped_column(String(24), default="PD-RETAIL-1.3")
+    scorecard: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+    decided_by: Mapped[str | None] = mapped_column(String(160), default=None)
+    execution_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)
+
+
+# --- Collections ---------------------------------------------------------------
+class DelinquencyCase(Base, UUIDMixin, TimestampMixin):
+    """A past-due facility under collections treatment."""
+
+    __tablename__ = "delinquency_cases"
+    __table_args__ = (Index("ix_delinquency_bucket", "bucket", "status"),)
+
+    case_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"),
+                                             index=True)
+    facility_type: Mapped[str] = mapped_column(String(24), default="loan")   # loan|card
+    facility_id: Mapped[str] = mapped_column(String(36), index=True)
+    facility_reference: Mapped[str] = mapped_column(String(48), default="")
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
+    outstanding: Mapped[float] = mapped_column(Float, default=0.0)
+    amount_overdue: Mapped[float] = mapped_column(Float, default=0.0)
+    minimum_due: Mapped[float] = mapped_column(Float, default=0.0)
+    days_past_due: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    bucket: Mapped[str] = mapped_column(String(16), default="X")   # X,1,2,3,4,5+ / NPA
+    asset_classification: Mapped[str] = mapped_column(String(24), default="standard")
+    strategy: Mapped[str | None] = mapped_column(String(40), default=None)
+    status: Mapped[str] = mapped_column(String(24), default="open", index=True)
+    assigned_to: Mapped[str | None] = mapped_column(String(160), default=None)
+    last_contacted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    next_action_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    # Regulated contact controls; set by the customer, honoured by every tool.
+    contact_consent: Mapped[bool] = mapped_column(Boolean, default=True)
+    cease_contact: Mapped[bool] = mapped_column(Boolean, default=False)
+    dispute_open: Mapped[bool] = mapped_column(Boolean, default=False)
+    hardship_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    opened_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+
+
+class ContactAttempt(Base, UUIDMixin):
+    """Every outreach, kept because contact frequency is itself regulated."""
+
+    __tablename__ = "contact_attempts"
+    __table_args__ = (Index("ix_contact_case_time", "case_id", "attempted_at"),)
+
+    case_id: Mapped[str] = mapped_column(ForeignKey("delinquency_cases.id", ondelete="CASCADE"),
+                                         index=True)
+    customer_id: Mapped[str] = mapped_column(String(36), index=True)
+    channel: Mapped[str] = mapped_column(String(24), default="call")  # call|sms|email|letter|visit
+    direction: Mapped[str] = mapped_column(String(12), default="outbound")
+    outcome: Mapped[str] = mapped_column(String(32), default="no_answer")
+    attempted_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
+    local_hour: Mapped[int] = mapped_column(Integer, default=0)
+    agent_name: Mapped[str | None] = mapped_column(String(160), default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    execution_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)
+
+
+class PromiseToPay(Base, UUIDMixin, TimestampMixin):
+    """A commitment captured from the customer, and whether it was kept."""
+
+    __tablename__ = "promises_to_pay"
+
+    case_id: Mapped[str] = mapped_column(ForeignKey("delinquency_cases.id", ondelete="CASCADE"),
+                                         index=True)
+    customer_id: Mapped[str] = mapped_column(String(36), index=True)
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    promised_date: Mapped[date] = mapped_column(Date, index=True)
+    channel: Mapped[str] = mapped_column(String(24), default="call")
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    settled_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    settled_on: Mapped[date | None] = mapped_column(Date, default=None)
+    captured_by: Mapped[str | None] = mapped_column(String(160), default=None)
+    execution_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)
+
+
+class RepaymentPlan(Base, UUIDMixin, TimestampMixin):
+    """A restructured schedule offered after a hardship assessment."""
+
+    __tablename__ = "repayment_plans"
+
+    plan_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    case_id: Mapped[str] = mapped_column(ForeignKey("delinquency_cases.id", ondelete="CASCADE"),
+                                         index=True)
+    customer_id: Mapped[str] = mapped_column(String(36), index=True)
+    plan_type: Mapped[str] = mapped_column(String(40), default="instalment")
+    instalment_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    instalments: Mapped[int] = mapped_column(Integer, default=0)
+    frequency: Mapped[str] = mapped_column(String(16), default="monthly")
+    first_payment_date: Mapped[date | None] = mapped_column(Date, default=None)
+    total_payable: Mapped[float] = mapped_column(Float, default=0.0)
+    concession_type: Mapped[str | None] = mapped_column(String(40), default=None)
+    concession_value: Mapped[float] = mapped_column(Float, default=0.0)
+    affordability: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+    status: Mapped[str] = mapped_column(String(24), default="proposed", index=True)
+    approved_by: Mapped[str | None] = mapped_column(String(160), default=None)
+    execution_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)
