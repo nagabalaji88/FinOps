@@ -24,7 +24,7 @@ import {
   ExclamationTriangleIcon,
   QueueListIcon,
 } from '@heroicons/react/24/outline'
-import { api, type Overview as OverviewData, AnimatedNumber, Badge, Card, CardHeader, ErrorState, Meter, PageHeader, SkeletonCard, Stat, formatBytes, formatCompact, formatCurrency, formatDuration, formatNumber, formatPercent, relativeTime } from '@finops/shared'
+import { api, type Overview as OverviewData, AnimatedNumber, Badge, Card, CardHeader, ChartTooltip, ErrorState, Meter, PageHeader, SkeletonCard, Stat, formatBytes, formatCompact, formatCurrency, formatDuration, formatNumber, formatPercent, relativeTime } from '@finops/shared'
 
 interface AiUsage {
   window_days: number
@@ -63,21 +63,6 @@ const chartAxis = {
   tick: { fill: 'rgb(var(--ink-subtle))', fontSize: 10 },
   tickLine: false,
   axisLine: false,
-}
-
-function ChartTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="rounded-lg border border-line bg-surface-raised px-2.5 py-2 text-2xs shadow-glass-lg">
-      <p className="mb-1 font-medium text-ink">{label}</p>
-      {payload.map((entry: any) => (
-        <p key={entry.dataKey} className="flex items-center gap-2 text-ink-muted">
-          <span className="h-1.5 w-1.5 rounded-full" style={{ background: entry.color }} />
-          {entry.name}: <span className="tabular-nums text-ink">{entry.value}</span>
-        </p>
-      ))}
-    </div>
-  )
 }
 
 export default function Overview() {

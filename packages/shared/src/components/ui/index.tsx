@@ -489,3 +489,62 @@ export function Reveal({
     </motion.div>
   )
 }
+
+/**
+ * A Recharts payload entry, narrowed to the fields a tooltip actually reads.
+ *
+ * Recharts types the tooltip's `payload` loosely because a chart may carry any datum; this
+ * is the part every chart in both consoles has, so the tooltip below can be typed instead
+ * of taking `any` in seven near-identical copies.
+ */
+export interface ChartPayloadEntry {
+  dataKey?: string | number
+  name?: string | number
+  value?: number | string
+  color?: string
+}
+
+export interface ChartTooltipProps {
+  active?: boolean
+  label?: string | number
+  payload?: ChartPayloadEntry[]
+  /** Render the value — currency, duration, percentage — for this chart. */
+  format?: (value: number | string | undefined) => string
+  /** Show the series colour as a dot. Off for single-series charts. */
+  showSeriesColor?: boolean
+}
+
+/** The tooltip used by every chart in both consoles. */
+export function ChartTooltip({
+  active,
+  payload,
+  label,
+  format,
+  showSeriesColor = true,
+}: ChartTooltipProps) {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="rounded-lg border border-line bg-surface-raised px-2.5 py-2 text-2xs shadow-glass-lg">
+      {label !== undefined && label !== '' ? (
+        <p className="mb-1 font-medium text-ink">{label}</p>
+      ) : null}
+      {payload.map((entry, index) => (
+        <p
+          key={entry.dataKey ?? entry.name ?? index}
+          className="flex items-center gap-2 text-ink-muted"
+        >
+          {showSeriesColor && entry.color ? (
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{ background: entry.color }}
+            />
+          ) : null}
+          {entry.name}:{' '}
+          <span className="tabular-nums text-ink">
+            {format ? format(entry.value) : entry.value}
+          </span>
+        </p>
+      ))}
+    </div>
+  )
+}

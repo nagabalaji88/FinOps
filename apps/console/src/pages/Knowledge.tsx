@@ -32,12 +32,32 @@ interface KnowledgeDashboard {
   search: { queries_7d: number; avg_latency_ms: number; avg_results: number }
 }
 
+/** One retrieved chunk from `POST /knowledge/search`. */
+interface SearchMatch {
+  chunk_id: string
+  document_id: string
+  source: string
+  title: string
+  heading: string | null
+  uri: string | null
+  chunk_index: number
+  score: number
+  content: string
+  metadata: Record<string, unknown>
+}
+
+/** `POST /knowledge/sources/{key}/sync`. `missing` names the settings a connector needs. */
+interface SyncResult {
+  status: string
+  missing?: string[]
+}
+
 export default function Knowledge() {
   const queryClient = useQueryClient()
   const push = useToasts((state) => state.push)
   const { can } = useAuth()
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<any[] | null>(null)
+  const [results, setResults] = useState<SearchMatch[] | null>(null)
   const [uploadTarget, setUploadTarget] = useState<string>('runbooks')
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -48,7 +68,7 @@ export default function Knowledge() {
   })
 
   const search = useMutation({
-    mutationFn: () => api.post<{ results: any[]; latency_ms: number; backend: string; method: string }>(
+    mutationFn: () => api.post<{ results: SearchMatch[]; latency_ms: number; backend: string; method: string }>(
       '/knowledge/search',
       { query, top_k: 8 },
     ),
@@ -57,8 +77,9 @@ export default function Knowledge() {
   })
 
   const sync = useMutation({
-    mutationFn: (key: string) => api.post(`/knowledge/sources/${key}/sync`),
-    onSuccess: (response: any) => {
+    mutationFn: (key: string) =>
+      api.post<SyncResult>(`/knowledge/sources/${key}/sync`),
+    onSuccess: (response) => {
       push({
         title: response.status === 'connected' ? 'Source synced' : 'Sync skipped',
         description: response.missing ? `Missing: ${response.missing.join(', ')}` : undefined,
@@ -74,9 +95,9 @@ export default function Knowledge() {
       const form = new FormData()
       form.append('file', file)
       form.append('title', file.name)
-      return api.upload(`/knowledge/sources/${uploadTarget}/documents`, form)
+      return api.upload<{ chunks: number }>(`/knowledge/sources/${uploadTarget}/documents`, form)
     },
-    onSuccess: (response: any) => {
+    onSuccess: (response) => {
       push({ title: 'Document indexed', description: `${response.chunks} chunks embedded`, tone: 'ok' })
       void queryClient.invalidateQueries({ queryKey: ['knowledge'] })
     },

@@ -5,6 +5,37 @@ import { ArrowLeftIcon, PlayIcon } from '@heroicons/react/24/outline'
 import { api, type Agent, type Execution, Badge, Button, Card, CardHeader, EmptyState, ErrorState, JsonView, PageHeader, Skeleton, StatusDot, TabPanel, Tabs, useAuth, useToasts, formatCurrency, formatDateTime, formatDuration, formatNumber, formatPercent, relativeTime } from '@finops/shared'
 import { ExecuteDialog } from '@/components/agents/ExecuteDialog'
 
+/**
+ * The published fields of an agent's configuration. The index signature keeps the numeric
+ * controls below generic — they are rendered from a list of field names — without giving up
+ * the named fields the page reads directly.
+ */
+interface AgentConfig {
+  model?: string
+  system_prompt?: string
+  temperature?: number
+  max_tokens?: number
+  max_iterations?: number
+  cost_cap_usd?: number
+  require_citations?: boolean
+  mask_pii?: boolean
+  final_approval_required?: boolean
+  final_approval_risk_threshold?: string
+  [key: string]: string | number | boolean | undefined
+}
+
+/** `GET /agents/{key}/versions`. */
+interface AgentVersionRow {
+  version: number
+  changelog: string | null
+  published: boolean
+  is_current: boolean
+  published_at: string | null
+  published_by: string | null
+  created_at: string
+  config: Record<string, unknown>
+}
+
 export default function AgentDetail() {
   const { agentKey = '' } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -27,13 +58,14 @@ export default function AgentDetail() {
   })
   const versions = useQuery({
     queryKey: ['agent-versions', agentKey],
-    queryFn: () => api.get<any[]>(`/agents/${agentKey}/versions`),
+    queryFn: () => api.get<AgentVersionRow[]>(`/agents/${agentKey}/versions`),
     enabled: tab === 'versions',
   })
 
   const save = useMutation({
-    mutationFn: (config: Record<string, unknown>) => api.put(`/agents/${agentKey}/config`, config),
-    onSuccess: (response: any) => {
+    mutationFn: (config: Record<string, unknown>) =>
+      api.put<{ version: number }>(`/agents/${agentKey}/config`, config),
+    onSuccess: (response: { version: number }) => {
       push({ title: `Version ${response.version} saved`, description: 'Publish it to make it live', tone: 'ok' })
       void queryClient.invalidateQueries({ queryKey: ['agent', agentKey] })
       void queryClient.invalidateQueries({ queryKey: ['agent-versions', agentKey] })
@@ -61,7 +93,7 @@ export default function AgentDetail() {
 
   if (agent.isError) return <ErrorState error={agent.error} retry={() => agent.refetch()} />
   const data = agent.data
-  const config = (data?.config ?? {}) as Record<string, any>
+  const config = (data?.config ?? {}) as AgentConfig
   const metrics = data?.metrics
 
   return (
@@ -187,7 +219,7 @@ export default function AgentDetail() {
                       max={max as number}
                       step={step as number}
                       className="input"
-                      defaultValue={config[field as string]}
+                      defaultValue={config[field as string] as number | undefined}
                       disabled={!can('agent:write')}
                       onChange={(event) =>
                         setDraft((current) => ({ ...(current ?? {}), [field as string]: Number(event.target.value) }))

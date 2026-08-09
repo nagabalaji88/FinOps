@@ -33,6 +33,7 @@ import {
   Badge,
   Card,
   CardHeader,
+  ChartTooltip,
   EmptyState,
   ErrorState,
   Meter,
@@ -93,21 +94,6 @@ const chartAxis = {
   tick: { fill: 'rgb(var(--ink-subtle))', fontSize: 10 },
   tickLine: false,
   axisLine: false,
-}
-
-function ChartTooltip({ active, payload, label, format }: any) {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="rounded-lg border border-line bg-surface-raised px-2.5 py-2 text-2xs shadow-glass-lg">
-      <p className="mb-1 font-medium text-ink">{label}</p>
-      {payload.map((entry: any) => (
-        <p key={entry.dataKey} className="flex items-center gap-2 text-ink-muted">
-          <span className="h-1.5 w-1.5 rounded-full" style={{ background: entry.color }} />
-          {entry.name}: <span className="tabular-nums text-ink">{format ? format(entry.value) : entry.value}</span>
-        </p>
-      ))}
-    </div>
-  )
 }
 
 function Headline({
@@ -372,7 +358,7 @@ export default function Analytics() {
                           <Cell key={entry.model} fill={SERIES[index % SERIES.length]} />
                         ))}
                       </Pie>
-                      <ReTooltip content={<ChartTooltip format={(v: number) => formatCurrency(v, 4)} />} />
+                      <ReTooltip content={<ChartTooltip format={(value) => formatCurrency(Number(value), 4)} />} />
                     </PieChart>
                   </ResponsiveContainer>
                 ) : (

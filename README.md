@@ -201,9 +201,9 @@ Details in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Conformance suite
 
-Twenty scenario inputs across the five agents, plus an execution validation agent that
-routes each one to its agent, runs it for real, reviews any approval gate it hits, and
-asserts the expected behaviour.
+Twenty-eight scenario inputs across the seven agents — four each — plus an execution
+validation agent that routes each one to its agent, runs it for real, reviews any approval
+gate it hits, and asserts the expected behaviour.
 
 One command does everything: it prepares the database and seed data if they are missing,
 then runs the inputs one at a time and prints each agent's result as it arrives.
@@ -225,8 +225,8 @@ narrow content checks where a specific fact matters. Verdicts are `passed`, `fai
 ## Testing
 
 ```bash
-cd backend && .venv/bin/pytest -q       # 90 unit, integration and conformance tests
-npm run test && npm run typecheck && npm run build   # shared + both applications
+cd backend && .venv/bin/pytest -q       # 265 unit, integration and conformance tests
+npm run lint && npm run test && npm run typecheck && npm run build   # both applications
 ```
 
 The integration suite drives the whole graph through a scripted provider double: tool

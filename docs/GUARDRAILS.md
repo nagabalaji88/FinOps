@@ -59,7 +59,16 @@ s.333A in the UK — which is why it blocks outright rather than being redacted.
 | output | `self check output` | Model-judged: a decline without actionable reason codes, a figure no tool produced, a recommendation presented as a decision |
 
 The prohibited characteristics are those named in the Equal Credit Opportunity Act
-s.701(a), the RBI Fair Practices Code and Article 15 of the Indian Constitution.
+s.701(a), the RBI Fair Practices Code and Article 15 of the Indian Constitution. They are
+held in one alternation shared by every phrasing the rail matches, so adding a
+characteristic covers all of them rather than whichever pattern someone remembered.
+
+A discrimination rail is only worth its false-positive rate, and credit prose reuses the
+vocabulary: *a single missed instalment* is not marital status, *the age of the credit
+file* is not the age of a person, and a *community lending scheme* is a product. Those
+readings are anchored on the subject — the rail fires on "she is single", not on "a single
+instalment" — and both halves are held by `TestFairLendingPatterns`, which asserts the
+prohibited phrasings block **and** that thirteen ordinary underwriting sentences do not.
 
 ### Collections
 
@@ -252,7 +261,7 @@ The rail node picks the configuration up on the next run; nothing else needs cha
 
 ## Testing
 
-`backend/tests/test_guardrails.py` (42 tests) is written the way a control is tested: every
+`backend/tests/test_guardrails.py` (92 tests) is written the way a control is tested: every
 rail is proven to fire on the behaviour it exists to stop, proven not to fire on the
 legitimate work of the same agent, and proven to fail closed when it cannot run — including
 a test that registers a deliberately crashing detector and asserts the run is refused.

@@ -14,7 +14,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { api, Badge, Card, CardHeader, EmptyState, ErrorState, Meter, PageHeader, SkeletonCard, formatCurrency, formatNumber } from '@finops/shared'
+import { api, Badge, Card, CardHeader, ChartTooltip, EmptyState, ErrorState, Meter, PageHeader, SkeletonCard, formatCurrency, formatNumber } from '@finops/shared'
 
 interface Dimension {
   key: string
@@ -46,20 +46,6 @@ const axis = {
   tick: { fill: 'rgb(var(--ink-subtle))', fontSize: 10 },
   tickLine: false,
   axisLine: false,
-}
-
-function Tip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="rounded-lg border border-line bg-surface-raised px-2.5 py-2 text-2xs shadow-glass-lg">
-      <p className="mb-1 font-medium">{label}</p>
-      {payload.map((entry: any) => (
-        <p key={entry.dataKey} className="text-ink-muted">
-          {entry.name}: <span className="tabular-nums text-ink">{entry.value}</span>
-        </p>
-      ))}
-    </div>
-  )
 }
 
 function DimensionTable({ title, subtitle, rows }: { title: string; subtitle: string; rows: Dimension[] }) {
@@ -177,7 +163,7 @@ export default function Costs() {
                       <CartesianGrid stroke="rgb(var(--line))" strokeOpacity={0.5} vertical={false} />
                       <XAxis dataKey="date" {...axis} minTickGap={30} />
                       <YAxis {...axis} width={54} />
-                      <ReTooltip content={<Tip />} />
+                      <ReTooltip content={<ChartTooltip showSeriesColor={false} />} />
                       <Line
                         type="monotone"
                         dataKey="cost_usd"
@@ -213,7 +199,7 @@ export default function Costs() {
                           <Cell key={entry.key} fill={COLORS[index % COLORS.length]} />
                         ))}
                       </Pie>
-                      <ReTooltip content={<Tip />} />
+                      <ReTooltip content={<ChartTooltip showSeriesColor={false} />} />
                     </PieChart>
                   </ResponsiveContainer>
                 )}
@@ -252,7 +238,7 @@ export default function Costs() {
                     <CartesianGrid stroke="rgb(var(--line))" strokeOpacity={0.5} vertical={false} />
                     <XAxis dataKey="key" {...axis} angle={-12} height={44} textAnchor="end" interval={0} />
                     <YAxis {...axis} width={54} />
-                    <ReTooltip content={<Tip />} cursor={{ fill: 'rgb(var(--ink) / 0.04)' }} />
+                    <ReTooltip content={<ChartTooltip showSeriesColor={false} />} cursor={{ fill: 'rgb(var(--ink) / 0.04)' }} />
                     <Bar dataKey="cost_usd" name="Spend (USD)" fill="#5b7cfa" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>

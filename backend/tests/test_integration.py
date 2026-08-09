@@ -76,6 +76,61 @@ class TestCatalogueApi:
         for agent in coming_soon:
             assert agent["lifecycle_state"] == "disabled"
 
+    async def test_an_agent_that_ships_is_promoted_out_of_the_roadmap(self):
+        """An upgrade must not leave a released agent answering "not implemented yet".
+
+        The roadmap row is the platform's own placeholder. When the agent ships, seeding an
+        existing database has to move it — otherwise every environment seeded before the
+        release keeps refusing a shipped agent and the only fix is editing the table.
+        """
+        from app.db.models.agents import Agent, AgentVersion
+        from app.services.bootstrap import seed_agents
+
+        async with SessionFactory() as session:
+            agent = (
+                await session.execute(select(Agent).where(Agent.key == "credit_risk"))
+            ).scalar_one()
+            agent.availability, agent.lifecycle_state = "coming_soon", "disabled"
+            agent.config = {"planned_quarter": "Q4 2026"}
+            await session.execute(
+                AgentVersion.__table__.delete().where(AgentVersion.agent_id == agent.id))
+            await session.commit()
+
+            result = await seed_agents(session)
+            await session.commit()
+            assert result["agents_updated"] >= 1
+
+            await session.refresh(agent)
+            assert agent.availability == "implemented"
+            assert agent.lifecycle_state == "active"
+            assert agent.config.get("planned_quarter") is None
+            assert agent.tools, "the promoted row must carry the real agent definition"
+            version = (
+                await session.execute(
+                    select(AgentVersion).where(AgentVersion.agent_id == agent.id))
+            ).scalars().first()
+            assert version is not None and version.is_current
+
+    async def test_promotion_does_not_re_enable_an_agent_an_operator_disabled(self):
+        """Only `coming_soon` is ours to overrule; a deliberate shutdown must survive."""
+        from app.db.models.agents import Agent
+        from app.services.bootstrap import seed_agents
+
+        async with SessionFactory() as session:
+            agent = (
+                await session.execute(select(Agent).where(Agent.key == "collections"))
+            ).scalar_one()
+            agent.lifecycle_state = "disabled"
+            await session.commit()
+
+            await seed_agents(session)
+            await session.commit()
+            await session.refresh(agent)
+            assert agent.lifecycle_state == "disabled"
+
+            agent.lifecycle_state = "active"
+            await session.commit()
+
     async def test_roadmap_agent_cannot_execute(self, client: AsyncClient, auth: dict):
         response = await client.post("/api/v1/agents/trading/execute", headers=auth,
                                      json={"input": {"query": "trade"}})

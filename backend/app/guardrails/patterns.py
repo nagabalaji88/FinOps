@@ -82,13 +82,47 @@ TIPPING_OFF_OUTPUT_PATTERNS = [
 # Characteristics that must never enter a credit decision. Equal Credit Opportunity Act
 # s.701(a) in the US, the RBI Fair Practices Code and Article 15 of the Indian Constitution
 # all prohibit them; a lender that reasons from any of these is discriminating.
+#
+#: The characteristics themselves, in the forms people actually write them. Kept as one
+#: alternation so a characteristic added here is caught by every phrasing below rather than
+#: by whichever pattern someone remembered to update.
+#: `age of the applicant` is spelled out rather than a bare `age` so that the age of a
+#: credit file — a legitimate factor — is not mistaken for the age of a person.
+_PROTECTED = (r"caste|religion|religious|race|racial|ethnic\w*|gender|sex|female|male|"
+              r"sexual orientation|marital status|married|unmarried|divorced|widow\w*|"
+              r"pregnan\w*|maternity|paternity|childbearing|"
+              r"disab\w*|handicap\w*|nationality|postcode|pin ?code|neighbourhood|"
+              r"neighborhood|redlin\w*|elderly|too (old|young)|"
+              r"age of the (applicant|borrower|customer)")
+
 PROHIBITED_CREDIT_FACTORS = [
-    re.compile(r"\b(because|since|as|due to|given)\b.{0,40}\b(she|he) is\b.{0,20}"
-               r"\b(married|single|divorced|widow(ed)?|pregnant|old|young|female|male)\b", re.I),
-    re.compile(r"\b(decline|reject|refuse|approve|lower the limit|higher rate)\b.{0,60}"
-               r"\b(because|due to|on account of)\b.{0,40}"
-               r"\b(caste|religion|race|ethnic|gender|sex|marital status|pregnan|disab|"
-               r"nationality|region|postcode|pin ?code|neighbourhood)\b", re.I),
+    # "... because she is married", "... because the applicant may take maternity leave".
+    # The subject is named in the third person or as a role, and the verb may be a modal:
+    # "is pregnant" and "may get pregnant" are the same prohibited reasoning.
+    re.compile(r"\b(because|since|due to|given|owing to|on account of|on grounds of)\b.{0,50}"
+               r"\b(she|he|they|the (applicant|customer|borrower))\b.{0,20}"
+               r"\b(is|are|was|were|has|have|might|may|could|will|would|take|takes|taking|"
+               r"get|gets|getting|go|goes|going)\b.{0,30}"
+               r"\b(" + _PROTECTED + r")\b", re.I),
+    # "decline this because of their caste", "lower the limit because they are disabled",
+    # "higher rate due to her pregnancy" — a decision verb reasoning from a characteristic.
+    re.compile(r"\b(declin\w*|reject\w*|refus\w*|deny|denied|denies|approv\w*|"
+               r"(lower|reduce|cut|cap) the limit|higher (rate|pricing)|price up)\b.{0,70}"
+               r"\b(because|due to|on account of|owing to|on grounds of|based on)\b.{0,50}"
+               r"\b(" + _PROTECTED + r")\b", re.I),
+    # "she is single", "the applicant is divorced". Marital status is kept out of
+    # `_PROTECTED` and matched here instead: "single" is an ordinary quantifier in lending
+    # prose — "a single missed instalment" — and only means marital status when it is said
+    # of the person.
+    re.compile(r"\b(she|he|they|the (applicant|customer|borrower))\s+(is|are)\s+"
+               r"(a\s+)?(single|married|unmarried|divorced|widow\w*)\b", re.I),
+    # "he is from the same community", "she belongs to that caste" — group membership used
+    # as a reason without the characteristic being named outright. Anchored on the person so
+    # that a community lending scheme, which is a product and not a characteristic, passes.
+    re.compile(r"\b(she|he|they|the (applicant|customer|borrower))\s+"
+               r"(is|are|comes?|belongs?|belonged)\b.{0,20}\b(from|to|of)\b.{0,20}"
+               r"\b(communit\w*|caste|religion|sect|tribe|clan)\b", re.I),
+    # The characteristic proposed as a model input at all.
     re.compile(r"\b(caste|religion|race|ethnicity|gender|sex|marital status|"
                r"sexual orientation|disability)\b.{0,30}\b(risk|score|factor|weight|"
                r"consideration|criteri)", re.I),

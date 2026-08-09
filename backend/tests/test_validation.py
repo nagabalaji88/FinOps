@@ -12,6 +12,7 @@ import re
 import pytest
 from sqlalchemy import select
 
+from app.agents.registry import IMPLEMENTED as AGENT_SPECS
 from app.db.models.agents import Agent
 from app.db.session import SessionFactory
 from app.validation import (
@@ -31,27 +32,26 @@ from app.validation.report import format_live
 from app.validation.runner import prepare_environment
 from tests.conftest import TEST_MODEL
 
-IMPLEMENTED = {
-    "customer_service",
-    "kyc_onboarding",
-    "aml_investigation",
-    "investment_research",
-    "knowledge_assistant",
-}
+#: Read from the registry, not frozen here: implementing an agent without adding its
+#: scenarios must fail this suite rather than quietly shrink the coverage.
+IMPLEMENTED = {spec.key for spec in AGENT_SPECS}
+SCENARIOS_PER_AGENT = 4
 
 
 class TestScenarioCatalogue:
-    def test_twenty_scenarios_are_defined(self):
-        assert len(SCENARIOS) == 20
+    def test_the_catalogue_covers_every_implemented_agent(self):
+        assert len(SCENARIOS) == len(IMPLEMENTED) * SCENARIOS_PER_AGENT
 
     def test_ids_are_unique(self):
         ids = [s.id for s in SCENARIOS]
         assert len(set(ids)) == len(ids)
 
     def test_every_implemented_agent_is_covered_four_times(self):
-        assert set(agent_keys()) == IMPLEMENTED
+        assert set(agent_keys()) == IMPLEMENTED, (
+            f"uncovered: {sorted(IMPLEMENTED - set(agent_keys()))}")
         for key in IMPLEMENTED:
-            assert len(for_agent(key)) == 4, f"{key} should have four scenarios"
+            assert len(for_agent(key)) == SCENARIOS_PER_AGENT, \
+                f"{key} should have {SCENARIOS_PER_AGENT} scenarios"
 
     def test_scenarios_target_implemented_agents_only(self):
         assert all(s.agent_key in IMPLEMENTED for s in SCENARIOS)
@@ -65,6 +65,14 @@ class TestScenarioCatalogue:
         for scenario in SCENARIOS:
             for pattern in scenario.expect.must_match + scenario.expect.must_not_match:
                 re.compile(pattern)  # raises on a malformed expectation
+
+    def test_pattern_fields_are_tuples_not_strings(self):
+        """`must_match=("a|b")` is a string; iterating it asserts one character at a time."""
+        for scenario in SCENARIOS:
+            for name in ("tools_called", "tools_forbidden", "must_match", "must_not_match",
+                         "output_keys"):
+                value = getattr(scenario.expect, name)
+                assert isinstance(value, tuple), f"{scenario.id}.{name} is {type(value)}"
 
     def test_suite_exercises_the_governance_paths(self):
         assert any(s.expect.approval_expected for s in SCENARIOS), "no approval gate covered"

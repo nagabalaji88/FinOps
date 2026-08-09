@@ -25,7 +25,7 @@ import {
   GlobeAltIcon,
   MapPinIcon,
 } from '@heroicons/react/24/outline'
-import { api, AnimatedNumber, Badge, Card, CardHeader, EmptyState, ErrorState, Meter, PageHeader, Reveal, SkeletonCard, Stagger, Tabs, TabPanel, formatCompact, formatNumber, formatPercent, relativeTime } from '@finops/shared'
+import { api, AnimatedNumber, Badge, Card, CardHeader, ChartTooltip, EmptyState, ErrorState, Meter, PageHeader, Reveal, SkeletonCard, Stagger, Tabs, TabPanel, formatCompact, formatNumber, formatPercent, relativeTime } from '@finops/shared'
 import { Globe, type GlobeArc, type GlobeMarker, type RiskLevel } from '@/components/geo/Globe'
 import { ShareGauge } from '@/components/geo/ShareGauge'
 
@@ -147,21 +147,6 @@ const chartAxis = {
 
 function money(value: number, currency: string): string {
   return `${currency} ${formatCompact(value)}`
-}
-
-function ChartTooltip({ active, payload, label, currency }: any) {
-  if (!active || !payload?.length) return null
-  return (
-    <div className="rounded-lg border border-line bg-surface-raised px-2.5 py-2 text-2xs shadow-glass-lg">
-      <p className="mb-1 font-medium text-ink">{label}</p>
-      {payload.map((entry: any) => (
-        <p key={entry.dataKey} className="flex items-center gap-2 text-ink-muted">
-          <span className="h-1.5 w-1.5 rounded-full" style={{ background: entry.color }} />
-          {entry.name}: <span className="tabular-nums text-ink">{money(entry.value, currency)}</span>
-        </p>
-      ))}
-    </div>
-  )
 }
 
 /** A headline figure that counts up and carries its own share meter. */
@@ -590,7 +575,7 @@ export default function Geography() {
                       width={44}
                       tickFormatter={(value: number) => formatCompact(value)}
                     />
-                    <ReTooltip content={<ChartTooltip currency={currency} />} />
+                    <ReTooltip content={<ChartTooltip format={(value) => money(Number(value), currency)} />} />
                     <Area
                       type="monotone"
                       dataKey="domestic_value"

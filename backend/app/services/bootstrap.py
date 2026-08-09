@@ -73,6 +73,24 @@ async def seed_identities(session: AsyncSession) -> dict[str, Any]:
     return {"users_created": len(users)}
 
 
+async def _ensure_current_version(session: AsyncSession, agent: Agent,
+                                  config: dict[str, Any], changelog: str) -> None:
+    """Give the agent a published version row if it has none.
+
+    A promoted roadmap agent never had one — it was a placeholder — and the version history
+    endpoints and the rollback path both assume a current version exists.
+    """
+    existing = (
+        await session.execute(select(AgentVersion).where(AgentVersion.agent_id == agent.id))
+    ).scalars().first()
+    if existing is not None:
+        return
+    session.add(AgentVersion(agent_id=agent.id, version=agent.version or 1, config=config,
+                             changelog=changelog, published=True,
+                             published_at=datetime.now(UTC), published_by="system",
+                             is_current=True))
+
+
 async def seed_agents(session: AsyncSession) -> dict[str, Any]:
     created = updated = 0
     for spec in IMPLEMENTED:
@@ -90,11 +108,27 @@ async def seed_agents(session: AsyncSession) -> dict[str, Any]:
             )
             session.add(agent)
             await session.flush()
-            session.add(AgentVersion(agent_id=agent.id, version=1, config=config,
-                                     changelog="Built-in agent definition", published=True,
-                                     published_at=datetime.now(UTC), published_by="system",
-                                     is_current=True))
+            await _ensure_current_version(session, agent, config,
+                                          "Built-in agent definition")
             created += 1
+        elif agent.availability == "coming_soon":
+            # The agent has shipped since this database was seeded. The roadmap row is the
+            # platform's own placeholder — not an operator's decision to disable something —
+            # so it is promoted here. Without this, every environment seeded before the
+            # release answers "Agent 'x' is not implemented yet" for a released agent, and
+            # the only fix is editing the table by hand.
+            agent.name, agent.description = spec.name, spec.description
+            agent.category, agent.department = spec.category, spec.department
+            agent.owner, agent.owner_email = spec.owner, spec.owner_email
+            agent.availability, agent.lifecycle_state = "implemented", "active"
+            agent.config, agent.tags, agent.tools = config, spec.tags, spec.tools
+            agent.knowledge_sources = spec.knowledge_sources
+            agent.sla_latency_ms = spec.sla_latency_ms
+            agent.version = agent.version or 1
+            await _ensure_current_version(session, agent, config,
+                                          "Promoted from roadmap to implemented")
+            log.info("agent_promoted", agent=spec.key)
+            updated += 1
         elif agent.is_builtin and not agent.config:
             agent.config = config
             updated += 1

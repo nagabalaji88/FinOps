@@ -25,6 +25,34 @@ interface AuditRow {
   details: Record<string, unknown>
 }
 
+/** `GET /auth/api-keys`. The secret itself is returned once, at creation, and never here. */
+interface ApiKeyRow {
+  id: string
+  name: string
+  prefix: string
+  scopes: string[]
+  rate_limit_per_minute: number
+  usage_count: number
+  last_used_at: string | null
+  expires_at: string | null
+  revoked: boolean
+  created_at: string
+}
+
+/** `GET /auth/users`. */
+interface UserRow {
+  id: string
+  email: string
+  full_name: string
+  roles: string[]
+  department: string | null
+  is_active: boolean
+  mfa_enabled: boolean
+  is_service_account: boolean
+  last_login_at: string | null
+  locked: boolean
+}
+
 export default function Security() {
   const queryClient = useQueryClient()
   const push = useToasts((state) => state.push)
@@ -49,12 +77,12 @@ export default function Security() {
   })
   const apiKeys = useQuery({
     queryKey: ['api-keys'],
-    queryFn: () => api.get<any[]>('/auth/api-keys'),
+    queryFn: () => api.get<ApiKeyRow[]>('/auth/api-keys'),
     enabled: tab === 'keys',
   })
   const users = useQuery({
     queryKey: ['users'],
-    queryFn: () => api.get<any[]>('/auth/users'),
+    queryFn: () => api.get<UserRow[]>('/auth/users'),
     enabled: tab === 'users' && can('user:admin'),
   })
 
@@ -294,7 +322,7 @@ export default function Security() {
                           </td>
                           <td className="px-4 py-2.5">
                             <div className="flex flex-wrap gap-1">
-                              {user.roles.map((role: string) => (
+                              {user.roles.map((role) => (
                                 <span key={role} className="chip">
                                   {role}
                                 </span>

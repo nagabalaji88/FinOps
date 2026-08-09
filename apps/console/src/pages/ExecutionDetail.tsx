@@ -9,7 +9,7 @@ import {
   ClipboardDocumentIcon,
   StopCircleIcon,
 } from '@heroicons/react/24/outline'
-import { api, subscribeToExecution, type Execution, type ExecutionEvent, type ExecutionGraph, type LogRecord, type Trace, Badge, Button, Card, CardHeader, EmptyState, ErrorState, JsonView, Skeleton, StatusDot, TabPanel, Tabs, useAuth, useToasts, cn, copyToClipboard, downloadFile, formatCurrency, formatDateTime, formatDuration, formatNumber, formatTime, titleCase } from '@finops/shared'
+import { api, subscribeToExecution, type Citation, type Execution, type ExecutionEvent, type ExecutionGraph, type GuardrailFinding, type LogRecord, type PlanStep, type ToolCallSummary, type Trace, type ValidationFinding, Badge, Button, Card, CardHeader, EmptyState, ErrorState, JsonView, Skeleton, StatusDot, TabPanel, Tabs, useAuth, useToasts, cn, copyToClipboard, downloadFile, formatCurrency, formatDateTime, formatDuration, formatNumber, formatTime, titleCase } from '@finops/shared'
 import { TraceTimeline } from '@/components/executions/TraceTimeline'
 import { ExecutionFlow } from '@/components/executions/ExecutionFlow'
 
@@ -349,7 +349,7 @@ export default function ExecutionDetail() {
               <Card>
                 <CardHeader title="Citations" subtitle="Sources retrieved for this answer" />
                 <ul className="space-y-2 px-5 pb-5 pt-3">
-                  {(data!.output!.citations as any[]).map((citation) => (
+                  {(data!.output!.citations as Citation[]).map((citation) => (
                     <li key={citation.id} className="rounded-xl border border-line/70 px-3 py-2">
                       <p className="text-xs font-medium">
                         <span className="mr-1.5 font-mono text-ink-subtle">{citation.id}</span>
@@ -441,7 +441,7 @@ function EventBody({ event }: { event: ExecutionEvent }) {
           <p className="text-xs text-ink">{payload.plan?.objective ?? 'Plan created'}</p>
           {Array.isArray(payload.plan?.steps) && payload.plan.steps.length > 0 ? (
             <ol className="mt-1 space-y-0.5">
-              {payload.plan.steps.map((step: any, index: number) => (
+              {(payload.plan.steps as PlanStep[]).map((step, index) => (
                 <li key={index} className="text-2xs text-ink-muted">
                   {step.step ?? index + 1}. {step.action}
                   {step.tool ? <span className="ml-1 font-mono text-ink-subtle">({step.tool})</span> : null}
@@ -467,7 +467,7 @@ function EventBody({ event }: { event: ExecutionEvent }) {
           {payload.tokens?.input}/{payload.tokens?.output} tokens · {formatCurrency(payload.cost_usd, 5)}
           {payload.tool_calls?.length ? (
             <span className="ml-1 text-ink">
-              → {payload.tool_calls.map((call: any) => call.name).join(', ')}
+              → {(payload.tool_calls as ToolCallSummary[]).map((call) => call.name).join(', ')}
             </span>
           ) : null}
         </p>
@@ -501,7 +501,7 @@ function EventBody({ event }: { event: ExecutionEvent }) {
       return (
         <p className="text-xs text-ink-muted">
           {Array.isArray(payload.findings) && payload.findings.length
-            ? payload.findings.map((finding: any) => `${finding.rule}: ${finding.action}`).join(', ')
+            ? (payload.findings as GuardrailFinding[]).map((finding) => `${finding.rule}: ${finding.action}`).join(', ')
             : 'No findings'}
         </p>
       )
@@ -509,7 +509,7 @@ function EventBody({ event }: { event: ExecutionEvent }) {
       return (
         <p className="text-xs text-ink-muted">
           {Array.isArray(payload.findings)
-            ? payload.findings.map((finding: any) => `${finding.check}=${finding.status}`).join(' · ')
+            ? (payload.findings as ValidationFinding[]).map((finding) => `${finding.check}=${finding.status}`).join(' · ')
             : ''}
         </p>
       )

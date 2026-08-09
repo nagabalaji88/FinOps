@@ -20,15 +20,15 @@ import {
   ShieldCheckIcon,
   WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline'
-import { JsonView, cn, formatDuration, type ExecutionEvent } from '@finops/shared'
+import { JsonView, cn, formatDuration, type EventPayload, type ExecutionEvent, type GuardrailFinding } from '@finops/shared'
 
 type Tone = 'ok' | 'warn' | 'err' | 'info' | 'idle'
 
 interface Descriptor {
   icon: typeof BoltIcon
-  tone: Tone | ((payload: Record<string, any>) => Tone)
-  title: (payload: Record<string, any>) => string
-  detail?: (payload: Record<string, any>) => string | null
+  tone: Tone | ((payload: EventPayload) => Tone)
+  title: (payload: EventPayload) => string
+  detail?: (payload: EventPayload) => string | null
   expandable?: boolean
 }
 
@@ -116,7 +116,7 @@ const DESCRIPTORS: Record<string, Descriptor> = {
       return count ? `${side}: ${count} finding${count === 1 ? '' : 's'}` : `${side} passed`
     },
     detail: (p) => {
-      const rules = (p.findings ?? []).map((f: any) => f.rule).filter(Boolean)
+      const rules = ((p.findings ?? []) as GuardrailFinding[]).map((f) => f.rule).filter(Boolean)
       const parts = [
         rules.length ? rules.join(', ') : null,
         p.modified ? 'response was modified' : null,

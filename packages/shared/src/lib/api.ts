@@ -377,13 +377,64 @@ export interface Trace {
   spans: Span[]
 }
 
+/**
+ * The per-event payload the engine emits.
+ *
+ * Its shape is a union keyed by `type` — a `planning` event carries a plan, a `guardrail`
+ * event carries findings — so the field itself stays open and consumers narrow it with the
+ * interfaces below. That is the one place `any` is deliberate: modelling the union here
+ * would have to be kept in step with every node by hand, and a stale union is worse than an
+ * open one because it reads as a guarantee.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type EventPayload = Record<string, any>
+
+/** A source the engine retrieved and the answer cites. */
+export interface Citation {
+  id: string
+  title: string
+  excerpt: string
+  source: string
+  score: number
+  uri?: string | null
+}
+
+/** A rule that fired, from either the engine's own rules or a NeMo rail. */
+export interface GuardrailFinding {
+  rule: string
+  severity: string
+  action: string
+  detail?: string
+  source?: string
+}
+
+/** A post-response validation check and its outcome. */
+export interface ValidationFinding {
+  check: string
+  status: string
+  detail?: string
+}
+
+/** One step of the planner's plan. */
+export interface PlanStep {
+  step?: number
+  action: string
+  tool?: string | null
+}
+
+/** A tool the model asked for on an LLM turn. */
+export interface ToolCallSummary {
+  name: string
+  arguments?: Record<string, unknown>
+}
+
 export interface ExecutionEvent {
   sequence: number
   type: string
   node: string | null
   span_id: string | null
   timestamp: string
-  payload: Record<string, any>
+  payload: EventPayload
 }
 
 export interface GraphNode {
@@ -414,7 +465,7 @@ export interface Approval {
   node: string
   title: string
   summary: string
-  payload: Record<string, any>
+  payload: EventPayload
   risk_level: 'low' | 'medium' | 'high' | 'critical'
   required_role: string
   status: string

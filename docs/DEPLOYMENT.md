@@ -20,8 +20,16 @@ docker compose logs -f api
 ```
 
 `migrate` runs `alembic upgrade head` then `python -m app.cli init-db` and exits; `api`
-waits for it to complete successfully. Load the sample bank when you want data to work
-against:
+waits for it to complete successfully.
+
+`init-db` is written to be run on every upgrade, not only on an empty database. An agent
+that has shipped since this database was seeded still carries its roadmap row —
+`coming_soon`, `disabled`, no configuration — and would keep answering *"Agent 'x' is not
+implemented yet"* for a released agent. Seeding promotes those rows, logs
+`agent_promoted`, and reports the count as `agents_updated`. It promotes `coming_soon` only:
+an agent an operator deliberately disabled stays disabled.
+
+Load the sample bank when you want data to work against:
 
 ```bash
 docker compose exec api python -m app.cli seed-banking --customers 24

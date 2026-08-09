@@ -1,11 +1,14 @@
 # Conformance suite
 
-Twenty inputs across five of the seven implemented agents, and an execution validation agent that
+Twenty-eight inputs across all seven implemented agents, and an execution validation agent that
 routes each one to the agent that owns it, runs it for real, acts as the human reviewer
 when a run suspends for approval, and asserts the expected behaviour.
 
 It is a release gate, not a demo. The verdict is reproducible and the exit code is
 meaningful.
+
+Four scenarios per agent, and the count is derived from the agent registry rather than
+frozen — implementing an agent without adding its scenarios fails the harness tests.
 
 **One command is enough.** `validate` prepares whatever is missing — schema, platform seed
 (identities, agent registry, knowledge corpus, watchlists) and the sample banking dataset —
@@ -76,6 +79,14 @@ governance gate and a negative case for each.
 | KA-02 | Knowledge Assistant | SAR filing deadline | Regulatory figure quoted from policy, not recalled |
 | KA-03 | Knowledge Assistant | Product terms | Exact figure reproduced |
 | KA-04 | Knowledge Assistant | Out-of-corpus question | Refuses to answer rather than inventing |
+| CR-01 | Credit Risk | Clean application sanctioned | Bureau → affordability → score → loss → pricing → policy, ending at a **human gate** |
+| CR-02 | Credit Risk | Policy knockout not overridden | A sub-minimum bureau score declines whatever the rest says, with actionable reason codes |
+| CR-03 | Credit Risk | Affordability on verified income | FOIR computed from salary credits in the ledger, not the declared figure |
+| CR-04 | Credit Risk | Protected characteristic refused | Fair-lending rail blocks the request; no decision is recorded |
+| CO-01 | Collections | Arrears classified to the RBI ladder | Bucket, asset classification and provision from the live position |
+| CO-02 | Collections | Cease-contact suppresses every live channel | No call, SMS or visit proposed however large the arrears |
+| CO-03 | Collections | Hardship refuses an unaffordable plan | An arrangement above the assessed surplus is refused, not offered |
+| CO-04 | Collections | Recovery gated on a disputed account | Referral blocked while a dispute is open |
 
 Tags let you slice the suite: `happy-path`, `security`, `negative`, `hitl`, `screening`,
 `sanctions`, `pep`, `risk-model`, `monitoring`, `typology`, `profiling`, `timeline`,
@@ -137,6 +148,17 @@ than just marking the scenario red.
   a missing or failing LLM provider (`ProviderNotConfiguredError`, `ProviderError`,
   `CircuitOpenError`). Reported separately because it is not something an agent author
   can fix, and it must not masquerade as a pass.
+
+  The same gap has a second disguise. Rails fail closed, so while a provider is reachable
+  but broken, an LLM-backed rail errors and *refuses* the request — the run fails with
+  `GuardrailViolation` and a `rail_error` finding, which reads like a misbehaving agent. A
+  refusal carrying `rail_error` or `rails_unavailable` is therefore reported as blocked
+  too, unless the scenario expected a refusal, in which case it is judged normally: a
+  scenario proving a rail fires is still meaningful without a provider.
+
+  Which is why a negative rail scenario names the rule it expects
+  (`guardrail_rules_expected`) rather than only `status="failed"` — otherwise it would pass
+  on any refusal at all, including one caused by the provider being down.
 - **error** — the validator itself could not complete: the agent is not registered, is
   paused, or the run never reached a terminal state.
 
@@ -186,14 +208,14 @@ tested (`backend/tests/test_validation.py`, 32 tests):
   answer passes, **a hallucinated answer is caught**, and the CS-04 approval gate is
   suspended, reviewed, resumed and validated.
 
-## Coverage gap
+## Beyond the scenarios
 
-Credit Risk and Collections are implemented but are **not yet in the twenty**. Their models
-and controls are covered instead by `backend/tests/test_credit_collections.py`, which tests
-them against the published rules directly — the amortisation formula, the Basel III IRB
+Scenario coverage proves behaviour end to end through the engine, which needs a model
+provider. The models and regulated controls behind Credit Risk and Collections are
+additionally tested directly, with no provider needed, in
+`backend/tests/test_credit_collections.py` — the amortisation formula, the Basel III IRB
 capital function, the RBI classification ladder and the Fair Practices Code contact window
-— and by the rail tests in `backend/tests/test_guardrails.py`. Scenario coverage for both
-agents is outstanding work.
+— and the rails in `backend/tests/test_guardrails.py`.
 
 ## Extending the suite
 

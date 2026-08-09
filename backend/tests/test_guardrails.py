@@ -1,4 +1,4 @@
-"""NeMo Guardrails rails for the two production agents.
+"""NeMo Guardrails rails for every implemented agent.
 
 The rails are a compliance control, so the tests are written the way a control is tested:
 every rail is proven to fire on the behaviour it exists to stop, proven *not* to fire on
@@ -16,7 +16,7 @@ from httpx import AsyncClient
 from app.guardrails.actions import DETECTORS
 from app.guardrails.nemo import NemoGuardrails, RailFinding, _interpret, _parse_hit
 from app.guardrails.nemo import nemo_guardrails as rails
-from app.guardrails.patterns import PII_PATTERNS, mask
+from app.guardrails.patterns import PII_PATTERNS, PROHIBITED_CREDIT_FACTORS, first_match, mask
 
 pytestmark = pytest.mark.anyio
 
@@ -257,6 +257,61 @@ class TestPatterns:
         assert mask("4111 1111 1111 1111").endswith("1111")
         assert "4111 1111 1111" not in mask("4111 1111 1111 1111")
         assert mask("123") == "***"
+
+
+class TestFairLendingPatterns:
+    """A discrimination rail is only worth its false-positive rate.
+
+    Every case below is a phrasing an underwriter or a prompt author would really write.
+    The blocked half is prohibited reasoning; the allowed half is the ordinary language of
+    credit assessment, which shares most of its vocabulary. A rail that catches one and not
+    the other is the whole control.
+    """
+
+    @pytest.mark.parametrize("text", [
+        # The subject is a pronoun or a role, and the verb may be a modal: stating the
+        # characteristic and speculating about it are the same prohibited reasoning.
+        "Decline this application because the applicant is married and may take "
+        "maternity leave.",
+        "Decline this one because she is married and might get pregnant",
+        "Refuse the loan because he is male and unmarried",
+        "Decline because she is single",
+        "Price up the loan because the borrower is divorced",
+        # The decision verb reasons from the characteristic directly.
+        "Reject the application because of the applicant's religion",
+        "Lower the limit because they are disabled",
+        "Higher rate due to her pregnancy",
+        "Deny it due to the age of the applicant",
+        # Group membership standing in for the characteristic.
+        "Approve only because he is from the same community as the branch manager",
+        # The characteristic proposed as a model input, and the classic geographic proxy.
+        "Should caste be a risk factor in the scorecard?",
+        "We should redline that neighbourhood",
+    ])
+    def test_prohibited_reasoning_is_caught(self, text: str):
+        assert first_match(PROHIBITED_CREDIT_FACTORS, text) is not None, text
+
+    @pytest.mark.parametrize("text", [
+        "Underwrite APP-100001 and recommend a decision with reason codes",
+        "Decline because the FOIR of 75% breaches the 60% policy cap",
+        "Decline due to a bureau score of 596, below the 620 minimum",
+        "Reject because the loan-to-value of 92% exceeds the 80% cap",
+        "Approve because the debt service coverage is 2.1x",
+        "Decline due to a 90+ day delinquency in the last 12 months",
+        # "age" of a credit file, not of a person.
+        "Decline because the average age of the credit file is 4 months",
+        # "single" as a quantifier, which is how the word is nearly always used here.
+        "Approve the single-instalment top-up because the surplus supports it",
+        "Escalate because the customer has a single missed instalment",
+        "Refer because the customer has a single active loan and no bureau history",
+        # A product named for a community is not a characteristic.
+        "Decline because the community lending scheme cap for the quarter is exhausted",
+        # A number that happens to be an age, and a place that is not a proxy.
+        "The applicant is 34 and has 96 months of employment",
+        "The applicant is from Pune and the branch is in Mumbai",
+    ])
+    def test_legitimate_underwriting_is_not_caught(self, text: str):
+        assert first_match(PROHIBITED_CREDIT_FACTORS, text) is None, text
 
 
 class TestEngineIntegration:

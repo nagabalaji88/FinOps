@@ -20,7 +20,7 @@ from typing import Any, Literal
 from sqlalchemy import func, select
 
 from app.core.logging import get_logger
-from app.db.models.agents import Agent, Approval, Execution, Span
+from app.db.models.agents import Agent, Approval, Execution, ExecutionEvent, Span
 from app.db.models.banking import Customer
 from app.db.models.identity import User
 from app.db.session import session_scope
@@ -35,6 +35,12 @@ Verdict = Literal["passed", "failed", "blocked", "error"]
 
 TERMINAL = {"succeeded", "failed", "cancelled", "timeout"}
 PROVIDER_ERRORS = {"ProviderNotConfiguredError", "ProviderError", "CircuitOpenError"}
+
+#: Guardrail findings that mean the *rail* could not run, not that the agent misbehaved.
+#: Rails fail closed, so an unreachable provider turns into a refusal on every request until
+#: the circuit opens and the deterministic rails take over alone. Reporting that as a failed
+#: scenario points the operator at the agent instead of at the credential that is wrong.
+RAIL_INFRASTRUCTURE_RULES = {"rail_error", "rails_unavailable"}
 
 
 @dataclass
@@ -355,6 +361,22 @@ class ValidationRunner:
                 note=f"{observed.error_type}: {observed.error}",
             )
 
+        # The same gap wearing a different hat: the rail itself could not reach the provider
+        # and refused the request. Only when the scenario did not *expect* a refusal — a
+        # scenario proving a rail fires is still meaningful, and must be judged normally.
+        if observed.status == "failed" and scenario.expect.status != "failed":
+            infra = next(
+                (f for f in observed.guardrail_findings
+                 if str(f.get("rule")) in RAIL_INFRASTRUCTURE_RULES), None)
+            if infra is not None:
+                return ScenarioResult(
+                    scenario=scenario,
+                    verdict="blocked",
+                    observed=observed,
+                    duration_ms=duration_ms,
+                    note=f"guardrails could not run: {infra.get('detail') or infra.get('rule')}",
+                )
+
         checks = evaluate(scenario.expect, observed)
         critical_failures = [c for c in checks if c.failed and c.critical]
         verdict: Verdict = "passed" if not critical_failures else "failed"
@@ -484,6 +506,25 @@ class ValidationRunner:
             ).scalars().all()
 
             output = execution.output or {}
+            # A run the rails refused never produces an output, so its findings live only in
+            # the event log. Reading them here is what lets a scenario assert *which* rail
+            # fired instead of settling for "the run failed".
+            guardrail_findings = list(output.get("guardrails") or [])
+            if not guardrail_findings:
+                events = (
+                    await session.execute(
+                        select(ExecutionEvent)
+                        .where(ExecutionEvent.execution_id == execution_id,
+                               ExecutionEvent.type == "guardrail")
+                        .order_by(ExecutionEvent.sequence)
+                    )
+                ).scalars().all()
+                guardrail_findings = [
+                    finding
+                    for event in events
+                    for finding in (event.payload or {}).get("findings") or []
+                ]
+
             tool_invocations = [
                 (span.name.removeprefix("tool."), span.status == "ok")
                 for span in spans
@@ -505,7 +546,7 @@ class ValidationRunner:
                 node_path=list(execution.node_path or []),
                 tool_invocations=tool_invocations,
                 citations=list(output.get("citations") or []),
-                guardrail_findings=list(output.get("guardrails") or []),
+                guardrail_findings=guardrail_findings,
                 validation_findings=list(output.get("validation") or []),
                 approvals=[
                     {
