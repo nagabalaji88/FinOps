@@ -85,6 +85,29 @@ prohibited phrasings block **and** that thirteen ordinary underwriting sentences
 These are the RBI Fair Practices Code rules for lenders' recovery agents, and their FDCPA
 s.806–807 equivalents.
 
+### Payment Operations
+
+| Side | Rail | Blocks |
+|---|---|---|
+| input | `banking prompt integrity` | Injection and control bypass |
+| input | `wire stripping` | Removing, blanking or falsifying an originator or beneficiary; editing a SWIFT field so screening does not see it; "so it doesn't trigger the filter" phrasing |
+| input | `blocked funds` | Releasing, returning, refunding or unfreezing a payment held by a confirmed match; dismissing a hit in order to pay it; skipping screening, dual authorisation or maker-checker |
+| input | `self check input` | Model-judged: backdating a value date, recording a settlement that did not occur, under-stating compensation owed |
+| output | `wire stripping output` | The same proposal appearing in the answer |
+| output | `blocked funds output` | Likewise |
+| output | `sensitive disclosure` | Identifier masking |
+| output | `self check output` | Model-judged: a figure no tool produced, a SHA deduction reported as a defect, omitted compensation |
+
+Both input rails stop behaviour that is criminal rather than merely against policy. Wire
+stripping is prosecuted under IEEPA in the US and the equivalent EU regulations; moving
+funds frozen by a sanctions match is a breach whichever direction they move in, which is
+why returning a blocked payment to the originator is refused as firmly as releasing it.
+
+The same refusals are enforced independently in the tools, so a request that got past a
+rail would still meet `repair_payment` refusing a party name and `release_payment` reading
+the payment's own screening state rather than trusting the request. Details in
+[`docs/PAYMENTS.md`](PAYMENTS.md).
+
 ### KYC & Onboarding
 
 | Side | Rail | Blocks |
@@ -261,7 +284,7 @@ The rail node picks the configuration up on the next run; nothing else needs cha
 
 ## Testing
 
-`backend/tests/test_guardrails.py` (92 tests) is written the way a control is tested: every
+`backend/tests/test_guardrails.py` (92 tests) and `tests/test_payments.py` is written the way a control is tested: every
 rail is proven to fire on the behaviour it exists to stop, proven not to fire on the
 legitimate work of the same agent, and proven to fail closed when it cannot run — including
 a test that registers a deliberately crashing detector and asserts the run is refused.

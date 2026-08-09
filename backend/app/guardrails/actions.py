@@ -17,6 +17,7 @@ from typing import Any
 
 from app.core.logging import get_logger
 from app.guardrails.patterns import (
+    BLOCKED_FUNDS_PATTERNS,
     COLLECTIONS_BYPASS_PATTERNS,
     COLLECTIONS_THREAT_PATTERNS,
     CONTROL_BYPASS_PATTERNS,
@@ -32,6 +33,7 @@ from app.guardrails.patterns import (
     TIPPING_OFF_OUTPUT_PATTERNS,
     TIPPING_OFF_PATTERNS,
     UNLICENSED_ADVICE_PATTERNS,
+    WIRE_STRIPPING_PATTERNS,
     first_match,
     mask,
 )
@@ -218,6 +220,26 @@ async def check_corpus_exfiltration(context: dict[str, Any] | None = None) -> st
     return f"corpus_exfiltration|{hit}" if hit else None
 
 
+async def check_wire_stripping(context: dict[str, Any] | None = None) -> str | None:
+    """Removing or falsifying a party on a payment message.
+
+    This is not a policy preference: stripping the originator or beneficiary to defeat
+    sanctions screening is prosecuted in its own right, so it blocks before any tool runs.
+    """
+    hit = first_match(WIRE_STRIPPING_PATTERNS, _text(context, "user_message"))
+    return f"wire_stripping|{hit}" if hit else None
+
+
+async def check_blocked_funds(context: dict[str, Any] | None = None) -> str | None:
+    """Moving funds a confirmed sanctions match has frozen, in either direction.
+
+    Releasing them to the beneficiary and returning them to the originator are both
+    breaches; so is dismissing the hit in order to do either.
+    """
+    hit = first_match(BLOCKED_FUNDS_PATTERNS, _text(context, "user_message"))
+    return f"blocked_funds|{hit}" if hit else None
+
+
 #: Detectors return a hit string or None. Every one is wrapped in `fail_closed` when it is
 #: registered, so a detector added later cannot accidentally fail open.
 DETECTORS = {
@@ -233,6 +255,8 @@ DETECTORS = {
     "check_market_conduct": check_market_conduct,
     "check_guaranteed_return": check_guaranteed_return,
     "check_corpus_exfiltration": check_corpus_exfiltration,
+    "check_wire_stripping": check_wire_stripping,
+    "check_blocked_funds": check_blocked_funds,
 }
 
 #: Transforms rewrite the message, so they must never return an error string as text and

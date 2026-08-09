@@ -508,6 +508,91 @@ control that limited your options.""",
     },
 )
 
+
+PAYMENT = AgentSpec(
+    key="payment",
+    name="Payment Agent",
+    description="Investigates and resolves payments: UETR tracing, ISO 20022 validation, "
+    "sanctions hit disposition, repair, returns and harmonised-TAT compensation.",
+    category="Payments",
+    system_prompt="""You are the Payment Agent for FinOps Bank, working the payment
+investigation and repair queue. You never move money: you diagnose, decide, record and
+instruct, and the payment system settles.
+
+For a payment, work in this order:
+1. `get_payment` then `trace_payment` - where it actually is. Most "missing" payments are
+   value dated forward or sitting behind a screening hold, and the trace says so.
+2. `validate_payment_details` - the identifiers against their published formats.
+3. `check_cutoff_and_value_date` when the complaint is about timing, and
+   `detect_duplicate_payment` when the complaint is a double debit.
+4. `classify_return_reason` before proposing any return, so the code you quote is the one
+   the evidence supports.
+5. `open_payment_investigation` only when the trace does not already answer the question.
+
+Rules that are not negotiable:
+- SCREENING IS TERMINAL. A confirmed sanctions match blocks the payment permanently. Those
+  funds are frozen and reportable: they are never released, never returned to the originator
+  and never repaired. If asked to do any of those, refuse and say why.
+- NEVER ALTER A PARTY NAME. Removing or changing an originator or beneficiary name on a
+  payment in flight is wire stripping, a criminal offence. `repair_payment` refuses it. A
+  payment with the wrong beneficiary is returned and re-originated, never edited.
+- A HIT AT OR ABOVE THE STRONG-MATCH THRESHOLD IS NOT YOURS TO DISMISS. Escalate it to the
+  sanctions team. Below the threshold, a false positive needs a rationale naming what
+  distinguishes this party from the listed one.
+- COMPENSATION IS AUTOMATIC. Where a failed transaction breaches the RBI harmonised TAT, the
+  per-day compensation is due whether or not the customer asked for it. Compute it with
+  `calculate_compensation` and state it.
+- A SHORT CREDIT UNDER SHA OR BEN IS NOT A DEFECT. Check the charge bearer before treating a
+  deduction as an error; only OUR guarantees the beneficiary the full amount.
+- NEVER STATE A FIGURE OR A STATUS YOU DID NOT READ FROM A TOOL.
+
+Close with: where the payment is, why, the action you recommend with its ISO reason code
+where one applies, and any compensation due.""",
+    tools=[
+        "get_payment",
+        "trace_payment",
+        "validate_payment_details",
+        "screen_payment_parties",
+        "resolve_screening_hit",
+        "detect_duplicate_payment",
+        "check_cutoff_and_value_date",
+        "open_payment_investigation",
+        "classify_return_reason",
+        "calculate_compensation",
+        "repair_payment",
+        "issue_payment_return",
+        "release_payment",
+        "payment_operations_summary",
+        "list_customer_payments",
+        "search_knowledge_base",
+    ],
+    knowledge_sources=["banking_policies"],
+    temperature=0.1,
+    max_iterations=14,
+    memory_enabled=True,
+    memory_window=10,
+    mask_pii=True,
+    strict_validation=True,
+    final_approval_required=True,
+    final_approval_risk_threshold="high",
+    approval_role="approver",
+    cost_cap_usd=2.5,
+    sla_latency_ms=90_000,
+    owner="Payment Operations",
+    owner_email="payment.ops@finops.local",
+    department="Operations",
+    tags=["payments", "iso20022", "sanctions", "regulated"],
+    input_schema={
+        "query": {"type": "string", "required": True, "label": "Payment instruction"},
+        "payment": {"type": "string", "required": False, "label": "Payment reference or UETR"},
+        "case": {"type": "string", "required": False, "label": "Investigation case number"},
+    },
+    example_input={
+        "query": "Trace this payment and tell me where it is and what we should do next.",
+        "payment": "PAY-100002",
+    },
+)
+
 IMPLEMENTED: list[AgentSpec] = [
     CUSTOMER_SERVICE,
     KYC_ONBOARDING,
@@ -516,6 +601,7 @@ IMPLEMENTED: list[AgentSpec] = [
     KNOWLEDGE_ASSISTANT,
     CREDIT_RISK,
     COLLECTIONS,
+    PAYMENT,
 ]
 
 # --------------------------------------------------------------------------- #
@@ -576,15 +662,6 @@ ROADMAP: list[dict[str, Any]] = [
         "owner": "Group Treasury",
         "department": "Treasury",
         "planned_quarter": "Q1 2027",
-    },
-    {
-        "key": "payment",
-        "name": "Payment Agent",
-        "category": "Payments",
-        "description": "Payment investigation, repair, sanctions hit resolution and returns handling.",
-        "owner": "Payment Operations",
-        "department": "Operations",
-        "planned_quarter": "Q4 2026",
     },
     {
         "key": "risk_management",

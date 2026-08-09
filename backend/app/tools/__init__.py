@@ -7,6 +7,7 @@ from app.tools import (  # noqa: F401
     credit,
     knowledge,
     kyc,  # noqa: F401
+    payments,
     research,
 )
 from app.tools.base import Tool, ToolContext, ToolRegistry, ToolResult, registry, tool

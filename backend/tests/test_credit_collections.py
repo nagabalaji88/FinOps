@@ -594,12 +594,22 @@ class TestAgentsAreImplemented:
         )
         assert response.status_code in (200, 202), response.text
 
-    async def test_the_roadmap_shrank_by_exactly_these_two(self, client: AsyncClient, auth: dict):
+    async def test_an_implemented_agent_is_never_still_on_the_roadmap(self, client: AsyncClient, auth: dict):
+        """The two lists must partition the catalogue, however many agents have shipped.
+
+        Asserting a roadmap *size* here would break on every release and teach the next
+        person to edit the number rather than ask why it moved.
+        """
+        from app.agents.registry import IMPLEMENTED, ROADMAP
+
         agents = (await client.get("/api/v1/agents", headers=auth)).json()
         roadmap = {a["key"] for a in agents if a["availability"] == "coming_soon"}
-        assert "credit_risk" not in roadmap
-        assert "collections" not in roadmap
-        assert len(roadmap) == 8
+        implemented = {a["key"] for a in agents if a["availability"] == "implemented"}
+
+        assert roadmap == {entry["key"] for entry in ROADMAP}
+        assert implemented == {spec.key for spec in IMPLEMENTED}
+        assert roadmap & implemented == set()
+        assert {"credit_risk", "collections"} <= implemented
 
     async def test_both_carry_guardrail_configurations(self):
         from app.guardrails.nemo import nemo_guardrails

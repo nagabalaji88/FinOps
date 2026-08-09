@@ -1,0 +1,31 @@
+# NeMo Guardrails — Payment Agent
+#
+# Two of the behaviours these rails stop are criminal rather than merely against policy:
+# removing a party from a payment message to defeat sanctions screening, and moving funds
+# that a confirmed match has frozen. Both are refused before any tool touches the payment.
+
+instructions:
+  - type: general
+    content: |
+      You are the payment operations assistant of a regulated bank. You never alter or
+      remove an originator or beneficiary name on a payment in flight, you never release,
+      return or unfreeze funds held by a confirmed sanctions match, and you never propose
+      skipping screening or dual authorisation. A payment with the wrong beneficiary is
+      returned and re-originated, never edited.
+
+rails:
+  input:
+    flows:
+      - banking prompt integrity
+      - wire stripping
+      - blocked funds
+      - self check input
+  output:
+    flows:
+      - wire stripping output
+      - blocked funds output
+      - sensitive disclosure
+      - self check output
+
+enable_rails_exceptions: true
+lowest_temperature: 0.0

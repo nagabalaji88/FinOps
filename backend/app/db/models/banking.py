@@ -197,9 +197,7 @@ class KycCase(Base, UUIDMixin, TimestampMixin):
     decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
     decided_by: Mapped[str | None] = mapped_column(String(255), default=None)
 
-    documents: Mapped[list[KycDocument]] = relationship(
-        back_populates="case", cascade="all, delete-orphan"
-    )
+    documents: Mapped[list[KycDocument]] = relationship(back_populates="case", cascade="all, delete-orphan")
 
 
 class KycDocument(Base, UUIDMixin, TimestampMixin):
@@ -335,9 +333,7 @@ class Portfolio(Base, UUIDMixin, TimestampMixin):
     risk_profile: Mapped[str] = mapped_column(String(24), default="moderate")
     mandate: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
 
-    holdings: Mapped[list[Holding]] = relationship(
-        back_populates="portfolio", cascade="all, delete-orphan"
-    )
+    holdings: Mapped[list[Holding]] = relationship(back_populates="portfolio", cascade="all, delete-orphan")
 
 
 class Holding(Base, UUIDMixin, TimestampMixin):
@@ -395,8 +391,7 @@ class CreditApplication(Base, UUIDMixin, TimestampMixin):
     __table_args__ = (Index("ix_credit_app_status", "status", "created_at"),)
 
     application_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"),
-                                             index=True)
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), index=True)
     product: Mapped[str] = mapped_column(String(40), default="personal_loan")
     requested_amount: Mapped[float] = mapped_column(Float, default=0.0)
     currency: Mapped[str] = mapped_column(String(3), default="INR")
@@ -422,10 +417,9 @@ class BureauRecord(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "bureau_records"
     __table_args__ = (Index("ix_bureau_customer_time", "customer_id", "pulled_at"),)
 
-    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"),
-                                             index=True)
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), index=True)
     bureau: Mapped[str] = mapped_column(String(40), default="CIBIL")
-    score: Mapped[int] = mapped_column(Integer, default=0)          # 300-900 (CIBIL scale)
+    score: Mapped[int] = mapped_column(Integer, default=0)  # 300-900 (CIBIL scale)
     score_scale_min: Mapped[int] = mapped_column(Integer, default=300)
     score_scale_max: Mapped[int] = mapped_column(Integer, default=900)
     accounts_total: Mapped[int] = mapped_column(Integer, default=0)
@@ -452,7 +446,8 @@ class CreditDecision(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "credit_decisions"
 
     application_id: Mapped[str] = mapped_column(
-        ForeignKey("credit_applications.id", ondelete="CASCADE"), index=True)
+        ForeignKey("credit_applications.id", ondelete="CASCADE"), index=True
+    )
     customer_id: Mapped[str] = mapped_column(String(36), index=True)
     decision: Mapped[str] = mapped_column(String(24), index=True)  # approve|decline|refer
     approved_amount: Mapped[float] = mapped_column(Float, default=0.0)
@@ -482,9 +477,8 @@ class DelinquencyCase(Base, UUIDMixin, TimestampMixin):
     __table_args__ = (Index("ix_delinquency_bucket", "bucket", "status"),)
 
     case_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"),
-                                             index=True)
-    facility_type: Mapped[str] = mapped_column(String(24), default="loan")   # loan|card
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id", ondelete="CASCADE"), index=True)
+    facility_type: Mapped[str] = mapped_column(String(24), default="loan")  # loan|card
     facility_id: Mapped[str] = mapped_column(String(36), index=True)
     facility_reference: Mapped[str] = mapped_column(String(48), default="")
     currency: Mapped[str] = mapped_column(String(3), default="INR")
@@ -492,7 +486,7 @@ class DelinquencyCase(Base, UUIDMixin, TimestampMixin):
     amount_overdue: Mapped[float] = mapped_column(Float, default=0.0)
     minimum_due: Mapped[float] = mapped_column(Float, default=0.0)
     days_past_due: Mapped[int] = mapped_column(Integer, default=0, index=True)
-    bucket: Mapped[str] = mapped_column(String(16), default="X")   # X,1,2,3,4,5+ / NPA
+    bucket: Mapped[str] = mapped_column(String(16), default="X")  # X,1,2,3,4,5+ / NPA
     asset_classification: Mapped[str] = mapped_column(String(24), default="standard")
     strategy: Mapped[str | None] = mapped_column(String(40), default=None)
     status: Mapped[str] = mapped_column(String(24), default="open", index=True)
@@ -515,8 +509,7 @@ class ContactAttempt(Base, UUIDMixin):
     __tablename__ = "contact_attempts"
     __table_args__ = (Index("ix_contact_case_time", "case_id", "attempted_at"),)
 
-    case_id: Mapped[str] = mapped_column(ForeignKey("delinquency_cases.id", ondelete="CASCADE"),
-                                         index=True)
+    case_id: Mapped[str] = mapped_column(ForeignKey("delinquency_cases.id", ondelete="CASCADE"), index=True)
     customer_id: Mapped[str] = mapped_column(String(36), index=True)
     channel: Mapped[str] = mapped_column(String(24), default="call")  # call|sms|email|letter|visit
     direction: Mapped[str] = mapped_column(String(12), default="outbound")
@@ -533,8 +526,7 @@ class PromiseToPay(Base, UUIDMixin, TimestampMixin):
 
     __tablename__ = "promises_to_pay"
 
-    case_id: Mapped[str] = mapped_column(ForeignKey("delinquency_cases.id", ondelete="CASCADE"),
-                                         index=True)
+    case_id: Mapped[str] = mapped_column(ForeignKey("delinquency_cases.id", ondelete="CASCADE"), index=True)
     customer_id: Mapped[str] = mapped_column(String(36), index=True)
     amount: Mapped[float] = mapped_column(Float, default=0.0)
     promised_date: Mapped[date] = mapped_column(Date, index=True)
@@ -552,8 +544,7 @@ class RepaymentPlan(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "repayment_plans"
 
     plan_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    case_id: Mapped[str] = mapped_column(ForeignKey("delinquency_cases.id", ondelete="CASCADE"),
-                                         index=True)
+    case_id: Mapped[str] = mapped_column(ForeignKey("delinquency_cases.id", ondelete="CASCADE"), index=True)
     customer_id: Mapped[str] = mapped_column(String(36), index=True)
     plan_type: Mapped[str] = mapped_column(String(40), default="instalment")
     instalment_amount: Mapped[float] = mapped_column(Float, default=0.0)
@@ -566,4 +557,155 @@ class RepaymentPlan(Base, UUIDMixin, TimestampMixin):
     affordability: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
     status: Mapped[str] = mapped_column(String(24), default="proposed", index=True)
     approved_by: Mapped[str | None] = mapped_column(String(160), default=None)
+    execution_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)
+
+
+# --- Payment operations -------------------------------------------------------
+# Modelled on ISO 20022: a `pacs.008` credit transfer carries a UETR that follows the
+# payment end to end, a charge bearer, and a settlement method. Investigation and return
+# handling use the ISO external code sets so the reasons here are the ones a
+# correspondent bank would actually receive.
+
+
+class PaymentInstruction(Base, UUIDMixin, TimestampMixin):
+    """One outbound or inbound payment, as it sits in the processing queue."""
+
+    __tablename__ = "payment_instructions"
+    __table_args__ = (
+        Index("ix_payment_status_value", "status", "value_date"),
+        Index("ix_payment_customer", "customer_id", "created_at"),
+    )
+
+    payment_reference: Mapped[str] = mapped_column(String(35), unique=True, index=True)
+    #: Unique End-to-end Transaction Reference. The one identifier that survives every hop,
+    #: which is what makes a cross-border trace possible at all.
+    uetr: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    end_to_end_id: Mapped[str] = mapped_column(String(35), default="")
+    message_type: Mapped[str] = mapped_column(String(16), default="pacs.008")
+    direction: Mapped[str] = mapped_column(String(12), default="outbound", index=True)
+    rail: Mapped[str] = mapped_column(String(16), default="swift")  # swift|neft|rtgs|imps|upi|sepa|ach
+    customer_id: Mapped[str | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"), index=True, default=None
+    )
+    debtor_name: Mapped[str] = mapped_column(String(160), default="")
+    debtor_account: Mapped[str] = mapped_column(String(34), default="")
+    debtor_agent_bic: Mapped[str] = mapped_column(String(11), default="")
+    creditor_name: Mapped[str] = mapped_column(String(160), default="")
+    creditor_account: Mapped[str] = mapped_column(String(34), default="")
+    creditor_agent_bic: Mapped[str] = mapped_column(String(11), default="")
+    intermediary_bic: Mapped[str | None] = mapped_column(String(11), default=None)
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    #: OUR, SHA or BEN. Decides who absorbs correspondent charges, and therefore whether a
+    #: short credit at the beneficiary is a defect or the agreed outcome.
+    charge_bearer: Mapped[str] = mapped_column(String(8), default="SHA")
+    charges_deducted: Mapped[float] = mapped_column(Float, default=0.0)
+    remittance_info: Mapped[str] = mapped_column(String(280), default="")
+    purpose_code: Mapped[str | None] = mapped_column(String(8), default=None)
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    status_reason: Mapped[str | None] = mapped_column(String(140), default=None)
+    #: Set when screening stops the payment. A payment on hold must never be released by a
+    #: tool that has not resolved the hit.
+    screening_status: Mapped[str] = mapped_column(String(16), default="clear", index=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    value_date: Mapped[date | None] = mapped_column(Date, index=True, default=None)
+    settled_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    cutoff_missed: Mapped[bool] = mapped_column(Boolean, default=False)
+    duplicate_of: Mapped[str | None] = mapped_column(String(36), default=None)
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+
+
+class PaymentScreeningHit(Base, UUIDMixin, TimestampMixin):
+    """A sanctions or watchlist hit raised against a payment party."""
+
+    __tablename__ = "payment_screening_hits"
+
+    payment_id: Mapped[str] = mapped_column(
+        ForeignKey("payment_instructions.id", ondelete="CASCADE"), index=True
+    )
+    #: Which ISO 20022 party the hit was raised on: debtor, creditor, agent or narrative.
+    matched_field: Mapped[str] = mapped_column(String(24), default="creditor_name")
+    matched_value: Mapped[str] = mapped_column(String(200), default="")
+    list_name: Mapped[str] = mapped_column(String(48), default="OFAC SDN")
+    list_entry_id: Mapped[str | None] = mapped_column(String(64), default=None)
+    match_score: Mapped[float] = mapped_column(Float, default=0.0)
+    #: pending | true_hit | false_positive. A true hit is terminal: the payment is blocked
+    #: and reported, never released.
+    disposition: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    rationale: Mapped[str | None] = mapped_column(Text, default=None)
+    decided_by: Mapped[str | None] = mapped_column(String(160), default=None)
+    decided_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    execution_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)
+
+
+class PaymentInvestigation(Base, UUIDMixin, TimestampMixin):
+    """A case opened on a payment that did not reach its beneficiary cleanly."""
+
+    __tablename__ = "payment_investigations"
+
+    case_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    payment_id: Mapped[str] = mapped_column(
+        ForeignKey("payment_instructions.id", ondelete="CASCADE"), index=True
+    )
+    #: non_receipt | wrong_beneficiary | short_credit | duplicate | delay | recall |
+    #: unauthorised. Drives which resolution paths are legitimate.
+    category: Mapped[str] = mapped_column(String(32), default="non_receipt", index=True)
+    raised_by: Mapped[str] = mapped_column(String(24), default="customer")
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(24), default="open", index=True)
+    resolution: Mapped[str | None] = mapped_column(String(48), default=None)
+    resolution_note: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The regulator's turnaround clock. RBI's harmonised TAT gives a per-day penalty once
+    #: the deadline passes, so the deadline is stored rather than recomputed from policy.
+    tat_deadline: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    compensation_due: Mapped[float] = mapped_column(Float, default=0.0)
+    compensation_paid: Mapped[float] = mapped_column(Float, default=0.0)
+    opened_at: Mapped[datetime | None] = mapped_column(UTCDateTime, index=True, default=None)
+    closed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
+    execution_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+
+
+class PaymentRepair(Base, UUIDMixin, TimestampMixin):
+    """An amendment to a payment's fields, and who authorised it.
+
+    Repairs are the highest-risk action in payment operations: changing a beneficiary or a
+    narrative is also how wire stripping is committed, so every repair records the before
+    and after values and the human who approved them.
+    """
+
+    __tablename__ = "payment_repairs"
+
+    payment_id: Mapped[str] = mapped_column(
+        ForeignKey("payment_instructions.id", ondelete="CASCADE"), index=True
+    )
+    field_name: Mapped[str] = mapped_column(String(40), default="")
+    previous_value: Mapped[str] = mapped_column(String(280), default="")
+    repaired_value: Mapped[str] = mapped_column(String(280), default="")
+    reason: Mapped[str] = mapped_column(String(140), default="")
+    repair_type: Mapped[str] = mapped_column(String(24), default="format")
+    status: Mapped[str] = mapped_column(String(20), default="applied", index=True)
+    approved_by: Mapped[str | None] = mapped_column(String(160), default=None)
+    execution_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)
+
+
+class PaymentReturn(Base, UUIDMixin, TimestampMixin):
+    """A payment sent back, with the ISO external reason code it was returned under."""
+
+    __tablename__ = "payment_returns"
+
+    return_reference: Mapped[str] = mapped_column(String(35), unique=True, index=True)
+    payment_id: Mapped[str] = mapped_column(
+        ForeignKey("payment_instructions.id", ondelete="CASCADE"), index=True
+    )
+    #: ISO 20022 external return reason, e.g. AC01 incorrect account number, AC04 closed
+    #: account, AM05 duplication, RR04 regulatory reason.
+    reason_code: Mapped[str] = mapped_column(String(8), default="AC01", index=True)
+    reason_description: Mapped[str] = mapped_column(String(160), default="")
+    message_type: Mapped[str] = mapped_column(String(16), default="pacs.004")
+    returned_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    charges_retained: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(20), default="issued", index=True)
+    approved_by: Mapped[str | None] = mapped_column(String(160), default=None)
+    issued_at: Mapped[datetime | None] = mapped_column(UTCDateTime, default=None)
     execution_id: Mapped[str | None] = mapped_column(String(36), index=True, default=None)

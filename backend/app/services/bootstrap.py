@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -27,6 +28,9 @@ from app.db.models.banking import (
     Holding,
     KycCase,
     Loan,
+    PaymentInstruction,
+    PaymentInvestigation,
+    PaymentScreeningHit,
     Portfolio,
     PriceBar,
     SanctionsEntry,
@@ -38,7 +42,7 @@ from app.db.models.knowledge import KnowledgeSource
 from app.db.session import engine
 from app.seed.corpus import KNOWLEDGE_SOURCES, SEED_DOCUMENTS
 from app.seed.watchlist import INTERNAL_WATCHLIST
-from app.tools.kyc import normalise_name
+from app.tools.kyc import name_similarity, normalise_name
 
 log = get_logger("bootstrap")
 
@@ -516,6 +520,7 @@ async def seed_sample_banking(
     txn_count += await _seed_income_and_repayments(session, created_customers, rng, now)
     credit_seeded = await _seed_credit_book(session, created_customers, rng, now)
     collections_seeded = await _seed_collections_book(session, created_customers, now)
+    payments_seeded = await _seed_payment_book(session, created_customers, now)
 
     # FAQ knowledge for the customer service agent
     faqs = [
@@ -705,6 +710,7 @@ async def seed_sample_banking(
         "kyc_cases": 1,
         **credit_seeded,
         **collections_seeded,
+        **payments_seeded,
     }
 
 
@@ -1017,3 +1023,223 @@ async def _seed_collections_book(
 
     await session.flush()
     return {"delinquency_cases": cases}
+
+
+# --- payment operations sample data -------------------------------------------
+#: Payments are seeded as a queue an operator would actually find on a Monday morning: one
+#: clean settled payment, one held on a weak name match, one blocked on a strong one, one
+#: with an invalid IBAN, one duplicate pair, and one late cross-border with an open
+#: investigation past its deadline. Each exists so a specific control has something to act
+#: on; none of them is decorative.
+_PAYMENT_PROFILES: list[dict[str, Any]] = [
+    {
+        "suffix": 1,
+        "rail": "swift",
+        "amount": 480_000.0,
+        "currency": "USD",
+        "creditor_name": "Helvetia Trading AG",
+        "creditor_account": "CH9300762011623852957",
+        "creditor_agent_bic": "UBSWCHZH80A",
+        "charge_bearer": "OUR",
+        "status": "settled",
+        "screening_status": "clear",
+        "settled": True,
+        "narrative": "Invoice INV-2026-4417 settlement",
+    },
+    {
+        "suffix": 2,
+        "rail": "swift",
+        "amount": 265_000.0,
+        "currency": "EUR",
+        # Close to a listed name but not the listed party: the case the false-positive
+        # path exists for.
+        "creditor_name": "Viktor P Sokolow",
+        "creditor_account": "DE89370400440532013000",
+        "creditor_agent_bic": "COBADEFFXXX",
+        "charge_bearer": "SHA",
+        "status": "on_hold",
+        "screening_status": "hold",
+        "settled": False,
+        "narrative": "Consultancy fees Q1",
+    },
+    {
+        "suffix": 3,
+        "rail": "swift",
+        "amount": 910_000.0,
+        "currency": "USD",
+        # An exact listed name: must be blocked, never released, never returned.
+        "creditor_name": "Viktor Petrovich Sokolov",
+        "creditor_account": "AE070331234567890123456",
+        "creditor_agent_bic": "EBILAEAD",
+        "charge_bearer": "SHA",
+        "status": "on_hold",
+        "screening_status": "hold",
+        "settled": False,
+        "narrative": "Equipment purchase",
+    },
+    {
+        "suffix": 4,
+        "rail": "sepa",
+        "amount": 74_500.0,
+        "currency": "EUR",
+        "creditor_name": "Bergmann Logistik GmbH",
+        # Deliberately fails the ISO 13616 check digits: the repair path needs a defect
+        # that validation can actually detect.
+        "creditor_account": "DE89370400440532013001",
+        "creditor_agent_bic": "DEUTDEFFXXX",
+        "charge_bearer": "SHA",
+        "status": "on_hold",
+        "screening_status": "clear",
+        "settled": False,
+        "narrative": "Freight charges March",
+    },
+    {
+        "suffix": 5,
+        "rail": "neft",
+        "amount": 125_000.0,
+        "currency": "INR",
+        "creditor_name": "Sundaram Textiles Private Limited",
+        "creditor_account": "50100234567890",
+        "creditor_agent_bic": "HDFC0001234",
+        "charge_bearer": "SHA",
+        "status": "pending",
+        "screening_status": "clear",
+        "settled": False,
+        "narrative": "Purchase order PO-88213",
+        "debtor_index": 4,
+    },
+    {
+        "suffix": 6,
+        "rail": "neft",
+        "amount": 125_000.0,
+        "currency": "INR",
+        # Same debtor, creditor, amount and currency as PAY-100005 inside the window: the
+        # duplicate the AM05 path is for.
+        "creditor_name": "Sundaram Textiles Private Limited",
+        "creditor_account": "50100234567890",
+        "creditor_agent_bic": "HDFC0001234",
+        "charge_bearer": "SHA",
+        "status": "pending",
+        "screening_status": "clear",
+        "settled": False,
+        "narrative": "Purchase order PO-88213",
+        # Same debtor as PAY-100005: a duplicate is the *same* payment sent twice, so the
+        # pair has to agree on the payer as well as the payee.
+        "debtor_index": 4,
+    },
+    {
+        "suffix": 7,
+        "rail": "imps",
+        "amount": 42_000.0,
+        "currency": "INR",
+        "creditor_name": "Anjali Deshpande",
+        "creditor_account": "20100987654321",
+        "creditor_agent_bic": "ICIC0004567",
+        "charge_bearer": "SHA",
+        "status": "failed",
+        "screening_status": "clear",
+        "settled": False,
+        "narrative": "Family transfer",
+        # Failed and not reversed: the harmonised-TAT compensation clock is already running.
+        "investigation": {
+            "category": "non_receipt",
+            "days_ago": 6,
+            "description": "Customer reports the beneficiary was never credited and the "
+            "debit has not been reversed.",
+        },
+    },
+]
+
+
+async def _seed_payment_book(
+    session: AsyncSession, customers: list[Customer], now: datetime
+) -> dict[str, Any]:
+    """Seed the payment queue, its screening hits and one overdue investigation."""
+    if not customers:
+        return {"payments": 0, "payment_investigations": 0}
+
+    payments = 0
+    investigations = 0
+    for offset, profile in enumerate(_PAYMENT_PROFILES):
+        debtor_index = profile.get("debtor_index", offset)
+        customer = customers[debtor_index % len(customers)]
+        submitted = now - timedelta(days=profile.get("investigation", {}).get("days_ago", 1), hours=3)
+        reference = f"PAY-{100000 + profile['suffix']}"
+        payment = PaymentInstruction(
+            payment_reference=reference,
+            uetr=str(uuid.uuid5(uuid.NAMESPACE_URL, f"finops/payment/{reference}")),
+            end_to_end_id=f"E2E-{100000 + profile['suffix']}",
+            message_type="pacs.008",
+            direction="outbound",
+            rail=profile["rail"],
+            customer_id=customer.id,
+            debtor_name=customer.full_name,
+            debtor_account=f"91{4000000000 + debtor_index}",
+            debtor_agent_bic="FINOINBBXXX"
+            if profile["rail"] not in {"neft", "rtgs", "imps"}
+            else "FINO0000001",
+            creditor_name=profile["creditor_name"],
+            creditor_account=profile["creditor_account"],
+            creditor_agent_bic=profile["creditor_agent_bic"],
+            currency=profile["currency"],
+            amount=profile["amount"],
+            charge_bearer=profile["charge_bearer"],
+            charges_deducted=0.0 if profile["charge_bearer"] == "OUR" else 1_250.0,
+            remittance_info=profile["narrative"],
+            status=profile["status"],
+            screening_status=profile["screening_status"],
+            submitted_at=submitted,
+            value_date=submitted.date(),
+            settled_at=submitted + timedelta(hours=4) if profile["settled"] else None,
+        )
+        session.add(payment)
+        await session.flush()
+        payments += 1
+
+        # The held payments carry the hit that put them there, so the disposition path has
+        # something real to resolve rather than a hit the agent has to invent.
+        if profile["screening_status"] == "hold":
+            entry = (
+                (
+                    await session.execute(
+                        select(SanctionsEntry).where(
+                            SanctionsEntry.normalised_name == normalise_name("Viktor Petrovich Sokolov")
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            score = name_similarity(profile["creditor_name"], "Viktor Petrovich Sokolov")
+            session.add(
+                PaymentScreeningHit(
+                    payment_id=payment.id,
+                    matched_field="creditor_name",
+                    matched_value=profile["creditor_name"],
+                    list_name=entry.list_name if entry else "OFAC_SDN",
+                    list_entry_id=entry.id if entry else None,
+                    match_score=round(score, 4),
+                    disposition="pending",
+                )
+            )
+
+        case_profile = profile.get("investigation")
+        if case_profile:
+            tat = timedelta(days=1)  # IMPS is a T+1 rail under the harmonised TAT
+            session.add(
+                PaymentInvestigation(
+                    case_number=f"PI-{100000 + profile['suffix']}",
+                    payment_id=payment.id,
+                    category=case_profile["category"],
+                    raised_by="customer",
+                    description=case_profile["description"],
+                    status="open",
+                    tat_deadline=submitted + tat,
+                    opened_at=submitted + timedelta(hours=6),
+                )
+            )
+            investigations += 1
+
+    await session.flush()
+    log.info("payment_book_seeded", payments=payments, investigations=investigations)
+    return {"payments": payments, "payment_investigations": investigations}

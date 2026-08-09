@@ -173,6 +173,67 @@ PROHIBITED_CREDIT_FACTORS = [
     re.compile(r"\bredlin(e|ing)\b", re.I),
 ]
 
+# Payment operations. Two behaviours here are criminal rather than merely wrong: removing a
+# party from a payment message to defeat sanctions screening ("wire stripping", prosecuted
+# under IEEPA and the equivalent EU regulations), and releasing or returning funds that a
+# confirmed match has frozen.
+WIRE_STRIPPING_PATTERNS = [
+    # "remove the beneficiary name", "strip the originator from field 50"
+    re.compile(
+        r"\b(strip|remove|delete|drop|omit|blank|erase|scrub|take out)\b.{0,40}"
+        r"\b(originator|ordering customer|beneficiary|debtor|creditor|remitter|"
+        r"applicant|payer|payee|sender)\b",
+        re.I,
+    ),
+    # "change the beneficiary name to", "replace the originator with"
+    re.compile(
+        r"\b(change|alter|amend|replace|substitute|rewrite|edit|falsify|mask)\b.{0,30}"
+        r"\b(originator|beneficiary|debtor|creditor|remitter|payer|payee|sender)\b"
+        r".{0,20}\b(name|details?|field)\b",
+        re.I,
+    ),
+    # The SWIFT field references people actually use when asking for this.
+    re.compile(r"\b(field|tag)\s*(50|59|52|57)\b.{0,40}\b(blank|remove|strip|clear)\b", re.I),
+    re.compile(r"\b(blank|clear|empty|remove|strip|drop)\b.{0,20}\b(field|tag)\s*(50|59|52|57)\b", re.I),
+    re.compile(r"\bwire[- ]?strip\w*\b", re.I),
+    # "so it doesn't get picked up by screening", "to avoid the filter"
+    re.compile(
+        r"\b(avoid|evade|bypass|get (a)?round|slip past|not trigger|defeat)\b.{0,30}"
+        r"\b(screening|sanctions? filter|the filter|watchlist|ofac|detection)\b",
+        re.I,
+    ),
+]
+
+#: Attempts to move money a confirmed sanctions match has frozen, in either direction.
+BLOCKED_FUNDS_PATTERNS = [
+    re.compile(
+        r"\b(releas\w*|unblock\w*|unfreez\w*|push (it )?through|let it go|send it anyway|"
+        r"process (it )?anyway|override|return\w*|send (it )?back|refund\w*)\b.{0,60}"
+        r"\b(sanction\w*|blocked|frozen|hit|match|ofac|watchlist)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(sanction\w*|blocked|frozen|true hit|confirmed match|"
+        r"(hit|match|alert) (is|was) confirmed)\b.{0,40}"
+        r"\b(releas\w*|unblock\w*|unfreez\w*|return it|send it back|refund|"
+        r"push (it )?through|pay (it )?anyway|process (it )?anyway)\b",
+        re.I,
+    ),
+    # "clear the hit without", "mark it a false positive so we can pay"
+    re.compile(
+        r"\b(clear|dismiss|close|mark)\b.{0,25}\b(hit|match|alert)\b.{0,40}"
+        r"\b(without|so (we|i) can|to (let|allow|release)|anyway)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(skip|bypass|without|no need (for|to)|don'?t bother)\b.{0,25}"
+        r"\b(screen\w*|sanctions? check|watchlist check|dual authorisation|"
+        r"dual authorization|four eyes|second approver|maker[- ]checker)\b",
+        re.I,
+    ),
+]
+
+
 # Threats and pressure tactics a collector may never use. RBI Fair Practices Code for
 # recovery agents, and the FDCPA s.806-807 equivalents.
 COLLECTIONS_THREAT_PATTERNS = [

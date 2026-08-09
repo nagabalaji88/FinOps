@@ -12,7 +12,7 @@ one domain doc for whatever you are touching.
 - Snapshot: 2026-08-09, branch `claude/enterprise-ai-command-center-fuwcla`
 - Backend: 27k lines Python, 265 tests, all green
 - Frontend: 11k lines TypeScript, lint/typecheck/tests/builds all green
-- 7 agents implemented, 8 on the roadmap, 67 tools, 28 conformance scenarios
+- 8 agents implemented, 7 on the roadmap, 82 tools, 32 conformance scenarios
 
 ---
 
@@ -45,7 +45,7 @@ FinOps/
 ├── packages/shared/        @finops/shared   — API client, design system, stores, Login
 ├── backend/
 │   ├── app/
-│   │   ├── agents/         AgentSpec + the registry of 7 implemented + 8 roadmap
+│   │   ├── agents/         AgentSpec + the registry of 8 implemented + 7 roadmap
 │   │   ├── api/v1/         7 route modules → one api_router
 │   │   ├── core/           config, security, rbac, errors, resilience, bus, metrics, otel
 │   │   ├── db/models/      agents.py, banking.py, identity.py, knowledge.py
@@ -55,11 +55,11 @@ FinOps/
 │   │   ├── rag/            pipeline, vectorstore, embeddings, chunking, connectors
 │   │   ├── seed/           corpus, watchlist, geo_reference
 │   │   ├── services/       bootstrap (seeding), evaluation, telemetry
-│   │   ├── tools/          base (registry) + 7 domain modules = 67 tools
+│   │   ├── tools/          base (registry) + 8 domain modules = 82 tools
 │   │   ├── validation/     conformance harness: scenarios, checks, runner, report
 │   │   └── workers/        Celery app + scheduled tasks
-│   ├── alembic/versions/   2 migrations
-│   └── tests/              5 modules, 265 tests
+│   ├── alembic/versions/   3 migrations
+│   └── tests/              6 modules
 ├── infra/                  helm chart, k8s manifests, prometheus, grafana, otel
 ├── docs/                   13 documents (this is one)
 ├── scripts/package.sh      release bundle from `git archive`
@@ -156,13 +156,13 @@ retrieval + plan + output schema.
 
 ### The registry
 
-`backend/app/agents/registry.py:510` — `IMPLEMENTED` (7 specs) and `ROADMAP` (8 dicts).
+`backend/app/agents/registry.py` — `IMPLEMENTED` (8 specs) and `ROADMAP` (7 dicts).
 
 Implemented: `customer_service`, `kyc_onboarding`, `aml_investigation`,
-`investment_research`, `knowledge_assistant`, `credit_risk`, `collections`.
+`investment_research`, `knowledge_assistant`, `credit_risk`, `collections`, `payment`.
 
 Roadmap: `trading`, `legal_contract`, `compliance`, `financial_planning`,
-`software_engineering`, `treasury`, `payment`, `risk_management`.
+`software_engineering`, `treasury`, `risk_management`.
 
 **The registry is the single source of truth.** Tests derive from it rather than hardcoding
 counts — `tests/test_validation.py` reads `IMPLEMENTED` so that implementing an agent
@@ -174,7 +174,7 @@ number; the count is telling you something is missing.
 
 ## 5. Tools
 
-`backend/app/tools/base.py` — 67 tools across 7 domain modules, registered by the `@tool` decorator.
+`backend/app/tools/base.py` — 82 tools across 8 domain modules, registered by the `@tool` decorator.
 
 ```python
 class MyArgs(BaseModel):
@@ -202,8 +202,8 @@ circuit breaker per tool, Prometheus metrics, health tracking, and an audit reco
 never raises to the caller — failures come back as `ToolResult(ok=False, error=...)` so the
 model can react.
 
-Counts by domain: banking 9, kyc 11, aml 7, market 9, credit 12, collections 13, knowledge
-5, analysis 1.
+Counts by domain: banking 9, kyc 11, aml 7, market 9, credit 12, collections 13, payments
+15, knowledge 5, analysis 1.
 
 **Invariant:** tools are the only path to a system of record. Do not query the database from
 a node, a rail or an API handler on an agent's behalf.
@@ -283,7 +283,7 @@ Use `usable_providers()` for any "can we do this?" decision.
 
 ## 8. Data model
 
-`backend/app/db/models/` — 4 modules, 49 tables.
+`backend/app/db/models/` — 4 modules, 54 tables.
 
 - **agents.py** — `agents`, `agent_versions`, `executions`, `spans`, `execution_events`,
   `log_records`, `approvals`, `cost_records`, `evaluations`, `playground_runs`,
@@ -291,7 +291,8 @@ Use `usable_providers()` for any "can we do this?" decision.
 - **banking.py** — customers, accounts, transactions, cards, loans, tickets, FAQ; KYC cases
   and documents; sanctions, AML alerts/cases, SAR reports; securities, portfolios, holdings,
   price bars, research notes; and the 7 lending tables (credit applications, bureau records,
-  credit decisions, delinquency cases, contact attempts, promises to pay, repayment plans)
+  credit decisions, delinquency cases, contact attempts, promises to pay, repayment plans);
+  and the 5 payment tables (instructions, screening hits, investigations, repairs, returns)
 - **identity.py** — users, api_keys, refresh_tokens, audit_logs, feature_flags,
   stored_secrets
 - **knowledge.py** — knowledge_sources, documents, chunks, search_query_logs,
@@ -415,7 +416,7 @@ across seven charts into one typed component.
 
 ## 12. Validation harness
 
-`backend/app/validation/` — 28 scenarios, 4 per implemented agent, run against real
+`backend/app/validation/` — 32 scenarios, 4 per implemented agent, run against real
 executions.
 
 ```bash
@@ -479,9 +480,9 @@ before starting — the published models (Basel III IRB capital, a logistic scor
 scaling, FOIR affordability, LGD with collateral haircuts, RBI asset classification) are the
 standard of rigour expected.
 
-**Suggested next tranche: Payment and Treasury.** Payment reuses the sanctions-screening and
-case machinery already built for AML; Treasury reuses the ledger and cash-position tables
-from Collections.
+**Payment is done** — read `app/tools/payments.py` and `docs/PAYMENTS.md`; it is the newest
+reference implementation. **Treasury is the suggested next one**, reusing the ledger and
+cash-position tables from Collections.
 
 ### Add a tool to an existing agent
 
@@ -543,10 +544,8 @@ both applications, Docker Compose with 18 services, Helm chart, CI with 6 jobs.
 
 | Item | State |
 |---|---|
-| 8 roadmap agents | Registered, listed, refuse to execute. Payment + Treasury proposed next |
-| `ruff format --check` in CI | `\|\| true`. 60 of 89 files would reformat — cosmetic, but the gate is decorative |
-| `mypy` in CI | `\|\| true`, and not installed in the venv. Has never actually run |
-| `pip-audit` in CI | `\|\| true`. Dependency CVEs do not fail the build |
+| 7 roadmap agents | Registered, listed, refuse to execute. Treasury proposed next |
+| ~~Soft CI gates~~ | Closed. `ruff format`, `mypy` and `pip-audit` are all enforced; nothing ends in `\|\| true` |
 | Model-dependent paths | Unproven here — no usable provider credential. `verify-provider` names each one |
 | Helm chart | Linted in CI only; no `helm` binary in the dev container |
 | Credit Risk / Collections in Execute | Implemented and railed but hidden behind `VITE_EXECUTE_AGENTS` |
@@ -582,6 +581,7 @@ implement a control, name the rule it implements.
 | `docs/ARCHITECTURE.md` | Components and data flow |
 | `docs/AGENTS.md` | Each agent's purpose, tools and controls |
 | `docs/CREDIT_AND_COLLECTIONS.md` | The lending models in detail |
+| `docs/PAYMENTS.md` | ISO 20022, screening, the wire-stripping refusals, harmonised TAT |
 | `docs/GUARDRAILS.md` | Every rail, the fail-closed rules, degradation |
 | `docs/VALIDATION.md` | The conformance harness and all 28 scenarios |
 | `docs/API.md` | Endpoint reference |

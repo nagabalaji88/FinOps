@@ -250,11 +250,12 @@ or a rail.
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — runbooks, alerts, incident response, retention
 - [`docs/SECURITY.md`](docs/SECURITY.md) — RBAC matrix, auth flows, secrets, audit, data handling
 - [`docs/GUARDRAILS.md`](docs/GUARDRAILS.md) — the NeMo rails on each production agent, and why they fail closed
+- [`docs/PAYMENTS.md`](docs/PAYMENTS.md) — the payment agent: ISO 20022, screening, wire-stripping refusals and harmonised-TAT compensation
 - [`docs/CREDIT_AND_COLLECTIONS.md`](docs/CREDIT_AND_COLLECTIONS.md) — the lending agents: scorecard, Basel capital, RBI classification and the Fair Practices Code
 - [`docs/PROCESS.md`](docs/PROCESS.md) — what each agent does, step by step, and where a human decides
 - [`docs/AGENTS.md`](docs/AGENTS.md) — agent contracts, tool catalogue, building a new agent
 - [`docs/API.md`](docs/API.md) — endpoint reference and streaming protocol
-- [`docs/VALIDATION.md`](docs/VALIDATION.md) — the 28 scenarios, assertions and the validation agent
+- [`docs/VALIDATION.md`](docs/VALIDATION.md) — the 32 scenarios, assertions and the validation agent
 - [`docs/BANKING_CONFIGURATION.md`](docs/BANKING_CONFIGURATION.md) — sample enterprise configuration
 
 ---

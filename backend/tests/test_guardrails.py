@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from httpx import AsyncClient
 
+from app.agents.registry import IMPLEMENTED as AGENT_SPECS
 from app.guardrails.actions import DETECTORS
 from app.guardrails.nemo import NemoGuardrails, RailFinding, _interpret, _parse_hit
 from app.guardrails.nemo import nemo_guardrails as rails
@@ -25,17 +26,10 @@ AML = "aml_investigation"
 CREDIT = "credit_risk"
 COLLECTIONS = "collections"
 
-#: Every agent that ships with a rail configuration. Adding an agent here means adding its
-#: rails; the tests below assert the configuration is complete and that it is enforced.
-RAILED_AGENTS = (
-    CUSTOMER_SERVICE,
-    AML,
-    CREDIT,
-    COLLECTIONS,
-    "kyc_onboarding",
-    "investment_research",
-    "knowledge_assistant",
-)
+#: Every implemented agent must ship a rail configuration, so the expected set is read from
+#: the registry rather than restated here. A hand-maintained tuple would simply be updated
+#: to match whenever an agent shipped without rails, which is the failure it exists to catch.
+RAILED_AGENTS = tuple(spec.key for spec in AGENT_SPECS)
 
 
 class TestRailConfiguration:
