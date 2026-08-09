@@ -4,7 +4,7 @@
 
 | Target | Requirements |
 |---|---|
-| Local | Python 3.11+, Node 22+ |
+| Local | Python 3.11–3.13, Node 22+ |
 | Compose | Docker 24+, 8 GB RAM free |
 | Kubernetes | 1.28+, ingress-nginx, cert-manager, External Secrets Operator, Prometheus Operator |
 

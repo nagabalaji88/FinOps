@@ -498,6 +498,12 @@ half of the test.
 
 ## 14. Running it
 
+**Python 3.11, 3.12 or 3.13.** The upper bound is NeMo Guardrails, which declares
+`<3.14` on every release through 0.23.0, and the rails are not optional — the engine
+refuses to run an agent that declares them when the package is missing, which every
+implemented agent does. `requires-python` enforces this, so pip refuses 3.14 up front
+rather than failing several minutes into a resolve.
+
 ```bash
 # Backend
 cd backend && python -m venv .venv && .venv/bin/pip install -e ".[dev,guardrails]"

@@ -12,6 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Must stay inside the `requires-python = ">=3.11,<3.14"` range in backend/pyproject.toml.
+  # The upper bound is NeMo Guardrails; see the comment there before bumping this.
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "22"
 

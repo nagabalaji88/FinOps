@@ -2,7 +2,13 @@
 name = "finops-command-center"
 version = "1.0.0"
 description = "Enterprise AI Agent Command Center for Financial Services"
-requires-python = ">=3.11"
+# Upper bound set by NeMo Guardrails, which declares `>=3.10,<3.14` on every release
+# through 0.23.0. Without the cap, pip happily starts an install on 3.14 and fails several
+# minutes later with a resolver error that never names the offending package. The rails are
+# not optional in practice: the engine refuses to run an agent that declares them when the
+# package is absent, and every implemented agent declares them. Raise this the moment NeMo
+# ships a release that supports a newer interpreter.
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
