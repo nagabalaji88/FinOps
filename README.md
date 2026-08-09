@@ -239,6 +239,11 @@ and the runner is exercised end to end including a caught hallucination.
 
 ## Documentation
 
+**Start here if you are new to the codebase:**
+[`docs/CODEBASE_MAP.md`](docs/CODEBASE_MAP.md) — the complete handoff. Every subsystem, the
+contracts between them, the invariants, and step-by-step recipes for adding an agent, a tool
+or a rail.
+
 - [`docs/APPLICATIONS.md`](docs/APPLICATIONS.md) — the two applications, what each one is for, and how they are deployed
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — engine, router, RAG, state and failure handling
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — Compose, Kubernetes, Helm, scaling, backup and restore
@@ -249,7 +254,7 @@ and the runner is exercised end to end including a caught hallucination.
 - [`docs/PROCESS.md`](docs/PROCESS.md) — what each agent does, step by step, and where a human decides
 - [`docs/AGENTS.md`](docs/AGENTS.md) — agent contracts, tool catalogue, building a new agent
 - [`docs/API.md`](docs/API.md) — endpoint reference and streaming protocol
-- [`docs/VALIDATION.md`](docs/VALIDATION.md) — the 20 scenarios, assertions and the validation agent
+- [`docs/VALIDATION.md`](docs/VALIDATION.md) — the 28 scenarios, assertions and the validation agent
 - [`docs/BANKING_CONFIGURATION.md`](docs/BANKING_CONFIGURATION.md) — sample enterprise configuration
 
 ---
