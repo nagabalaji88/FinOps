@@ -125,6 +125,74 @@ COLLECTIONS_BYPASS_PATTERNS = [
 ]
 
 
+# --- KYC & onboarding ---------------------------------------------------------
+# Requests to weaken customer due diligence. CDD is a statutory obligation under the PMLA
+# and the FATF recommendations; it is not something an operator may waive on request.
+KYC_INTEGRITY_PATTERNS = [
+    re.compile(r"\b(skip|waive|bypass|omit|forget|drop|relax)\b.{0,40}"
+               r"\b(kyc|cdd|edd|due diligence|screening|sanctions? check|pep check|"
+               r"verification|document check|id check)\b", re.I),
+    re.compile(r"\b(approve|onboard|clear|pass)\b.{0,40}\b(without|before|despite)\b"
+               r".{0,40}\b(screening|verification|documents?|checks?|match)\b", re.I),
+    re.compile(r"\b(mark|record|set|say)\b.{0,30}\b(as )?(verified|approved|clear)\b"
+               r".{0,40}\b(anyway|regardless|without checking|even though)\b", re.I),
+    re.compile(r"\b(ignore|overlook|dismiss)\b.{0,30}\b(the )?(sanctions?|pep|watchlist)\b"
+               r".{0,20}\b(hit|match|alert)\b", re.I),
+]
+
+# Discriminatory onboarding. Jurisdiction and country risk are legitimate AML factors;
+# refusing a person for who they are is not.
+DISCRIMINATORY_ONBOARDING_PATTERNS = [
+    re.compile(r"\b(reject\w*|refus\w*|declin\w*|deny|denial|denied|"
+               r"do not onboard|don'?t onboard)\b.{0,50}"
+               r"\b(because|due to|since|on account of|on grounds of)\b.{0,40}"
+               r"\b(religion|religious|caste|race|racial|ethnic\w*|muslim|hindu|christian|"
+               r"jew\w*|colour|color|tribe|tribal|indigenous)\b", re.I),
+    re.compile(r"\b(religion|caste|race|ethnicity|skin colour|skin color)\b.{0,30}"
+               r"\b(risk factor|risk score|onboarding criteri|red flag)\b", re.I),
+]
+
+# --- Investment research ------------------------------------------------------
+# Market abuse. Insider dealing and manipulation are criminal offences (SEBI PFUTP
+# regulations in India, MAR Article 14/15 in the EU, s.10(b) in the US).
+MARKET_ABUSE_PATTERNS = [
+    re.compile(r"\b(insider|non-?public|material non-?public|mnpi|unpublished price "
+               r"sensitive)\b.{0,40}\b(information|data|tip|news)\b", re.I),
+    re.compile(r"\b(front-?run|frontrunning|pump and dump|wash trade|wash sale|spoof\w*|"
+               r"layering the book|marking the close|painting the tape|ramp the price)\b",
+               re.I),
+    re.compile(r"\b(manipulat\w*|rig|corner)\b.{0,25}\b(the )?(market|price|stock|share)\b",
+               re.I),
+    re.compile(r"\b(trade|buy|sell)\b.{0,30}\bahead of\b.{0,30}"
+               r"\b(the )?(client|customer|order|announcement|research)\b", re.I),
+]
+
+# Promises no research note may make.
+# Inflections matter: "returns" must match as surely as "return", and "rejection" as
+# surely as "reject". A stem anchored with \b silently misses every inflected form, which
+# is the worst way for a rail to fail.
+GUARANTEED_RETURN_PATTERNS = [
+    re.compile(r"\b(guarantee\w*|assured|risk-?free|riskless|no risk of loss|"
+               r"cannot lose|can'?t lose)\b.{0,40}\b(returns?|profits?|gains?|upside|"
+               r"yields?)\b", re.I),
+    re.compile(r"\b(returns?|profits?|gains?|yields?)\b.{0,20}\b(are|is)\b.{0,15}"
+               r"\b(guarantee\w*|assured|risk-?free)\b", re.I),
+    re.compile(r"\b(will|is going to|is certain to)\b.{0,20}\b(double|triple|soar|"
+               r"definitely rise|definitely fall)\b", re.I),
+]
+
+# --- Knowledge assistant ------------------------------------------------------
+# Attempts to use enterprise retrieval as a credential store.
+CORPUS_EXFILTRATION_PATTERNS = [
+    re.compile(r"\b(find|search|show|give|list|retrieve|what is)\b.{0,40}"
+               r"\b(password|passwords|api key|api keys|secret key|private key|"
+               r"credential|credentials|token|access key|connection string)\b", re.I),
+    re.compile(r"\b(dump|export|list all)\b.{0,30}\b(documents?|corpus|knowledge base|"
+               r"everything)\b", re.I),
+    re.compile(r"\b(\.env|id_rsa|ssh key|service account key|kubeconfig)\b", re.I),
+]
+
+
 def mask(value: str) -> str:
     """Leave the last four characters legible; a servicing agent needs that much."""
     digits = re.sub(r"\D", "", value)

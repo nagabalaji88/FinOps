@@ -71,7 +71,22 @@ class ModelRouter:
         return self._providers.get(name)
 
     def configured_providers(self) -> list[str]:
+        """Providers whose settings are present. Says nothing about whether they work."""
         return [name for name, p in self._providers.items() if p.configured]
+
+    def usable_providers(self) -> list[str]:
+        """Providers that are configured *and* not currently circuit-broken.
+
+        `configured` only means the settings are non-empty, so a rotated, mistyped or
+        placeholder credential still counts as configured. Callers that need to know
+        whether a model call has any chance of succeeding must ask this instead.
+        """
+        from app.core.resilience import get_breaker
+
+        return [
+            name for name in self.configured_providers()
+            if get_breaker(f"llm:{name}").state != "open"
+        ]
 
     def available_models(self, *, embeddings: bool | None = None) -> list[ModelSpec]:
         configured = set(self.configured_providers())

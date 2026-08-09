@@ -20,7 +20,12 @@ from app.guardrails.patterns import (
     COLLECTIONS_BYPASS_PATTERNS,
     COLLECTIONS_THREAT_PATTERNS,
     CONTROL_BYPASS_PATTERNS,
+    CORPUS_EXFILTRATION_PATTERNS,
+    DISCRIMINATORY_ONBOARDING_PATTERNS,
     EVASION_PATTERNS,
+    GUARANTEED_RETURN_PATTERNS,
+    KYC_INTEGRITY_PATTERNS,
+    MARKET_ABUSE_PATTERNS,
     PII_PATTERNS,
     PROHIBITED_CREDIT_FACTORS,
     PROMPT_INJECTION_PATTERNS,
@@ -65,6 +70,11 @@ SEVERITY = {
     "prohibited_credit_factor": "critical",
     "collections_threat": "critical",
     "collections_control_bypass": "critical",
+    "kyc_integrity": "critical",
+    "discriminatory_onboarding": "critical",
+    "market_abuse": "critical",
+    "guaranteed_return": "high",
+    "corpus_exfiltration": "high",
 }
 
 
@@ -174,6 +184,44 @@ async def check_collections_control_bypass(context: dict[str, Any] | None = None
     return f"collections_control_bypass|{hit}" if hit else None
 
 
+async def check_kyc_integrity(context: dict[str, Any] | None = None) -> str | None:
+    """Requests to weaken customer due diligence, or to onboard discriminatorily.
+
+    Jurisdiction and country risk are legitimate AML factors and are not caught here;
+    refusing a person for who they are is.
+    """
+    for key in ("user_message", "bot_message"):
+        text = _text(context, key)
+        hit = first_match(KYC_INTEGRITY_PATTERNS, text)
+        if hit:
+            return f"kyc_integrity|{hit}"
+        hit = first_match(DISCRIMINATORY_ONBOARDING_PATTERNS, text)
+        if hit:
+            return f"discriminatory_onboarding|{hit}"
+    return None
+
+
+async def check_market_conduct(context: dict[str, Any] | None = None) -> str | None:
+    """Insider dealing, manipulation and front-running, in the request or the answer."""
+    for key in ("user_message", "bot_message"):
+        hit = first_match(MARKET_ABUSE_PATTERNS, _text(context, key))
+        if hit:
+            return f"market_abuse|{hit}"
+    return None
+
+
+async def check_guaranteed_return(context: dict[str, Any] | None = None) -> str | None:
+    """No research note may promise a return."""
+    hit = first_match(GUARANTEED_RETURN_PATTERNS, _text(context, "bot_message"))
+    return f"guaranteed_return|{hit}" if hit else None
+
+
+async def check_corpus_exfiltration(context: dict[str, Any] | None = None) -> str | None:
+    """Enterprise retrieval is not a credential store."""
+    hit = first_match(CORPUS_EXFILTRATION_PATTERNS, _text(context, "user_message"))
+    return f"corpus_exfiltration|{hit}" if hit else None
+
+
 #: Detectors return a hit string or None. Every one is wrapped in `fail_closed` when it is
 #: registered, so a detector added later cannot accidentally fail open.
 DETECTORS = {
@@ -185,6 +233,10 @@ DETECTORS = {
     "check_prohibited_credit_factors": check_prohibited_credit_factors,
     "check_collections_conduct": check_collections_conduct,
     "check_collections_control_bypass": check_collections_control_bypass,
+    "check_kyc_integrity": check_kyc_integrity,
+    "check_market_conduct": check_market_conduct,
+    "check_guaranteed_return": check_guaranteed_return,
+    "check_corpus_exfiltration": check_corpus_exfiltration,
 }
 
 #: Transforms rewrite the message, so they must never return an error string as text and

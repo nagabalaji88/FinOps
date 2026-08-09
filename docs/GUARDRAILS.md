@@ -2,8 +2,8 @@
 
 Two layers protect every run: the engine's own deterministic rules, and
 [NVIDIA NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) rail configurations for
-the production agents whose mistakes carry regulatory consequences — Customer Service, AML
-Investigation, Credit Risk and Collections.
+**every implemented agent**. An implemented agent with no rails is an ungoverned production
+surface, and a test asserts that none exists.
 
 ```
 request ──▶ input_rails ──▶ planner ─▶ retriever ─▶ memory ─▶ LLM ⇄ tools
@@ -76,6 +76,43 @@ s.701(a), the RBI Fair Practices Code and Article 15 of the Indian Constitution.
 These are the RBI Fair Practices Code rules for lenders' recovery agents, and their FDCPA
 s.806–807 equivalents.
 
+### KYC & Onboarding
+
+| Side | Rail | Blocks |
+|---|---|---|
+| input | `banking prompt integrity` | Injection and control bypass |
+| input | `due diligence integrity` | Requests to skip, waive or soften verification, screening or EDD; to approve despite a watchlist match or missing evidence; to record a result never obtained; or to accept or refuse on grounds of religion, caste, race or ethnicity |
+| output | `due diligence integrity output` | The same reasoning appearing in the recommendation |
+| output | `sensitive disclosure` | Identifier masking |
+
+Customer due diligence is a statutory obligation under the PMLA and the FATF
+recommendations, not a service level an operator may waive. **Jurisdiction and country risk
+are legitimate AML factors and are deliberately not caught** — assessing a customer
+resident in a high-risk country is normal practice; refusing a person for who they are is
+not.
+
+### Investment Research
+
+| Side | Rail | Blocks |
+|---|---|---|
+| input | `market conduct` | Material non-public information, manipulation, front-running, wash trading, spoofing, marking the close |
+| output | `market conduct output` | The same conduct in the answer |
+| output | `no guaranteed returns` | Any promise, assurance or "risk-free" claim about a return |
+| output | `self check output` | Model-judged: a figure no tool produced, a personal recommendation to a retail client, a missing disclaimer |
+
+Insider dealing and manipulation are criminal offences — SEBI's PFUTP regulations in India,
+MAR Articles 14–15 in the EU, s.10(b) in the US.
+
+### Internal Knowledge Assistant
+
+| Side | Rail | Blocks |
+|---|---|---|
+| input | `corpus exfiltration` | Requests for passwords, API keys, tokens, private keys or connection strings, and wholesale corpus dumps |
+| output | `sensitive disclosure` | Identifier masking |
+| output | `self check output` | Model-judged: an uncited claim, or an answer the retrieved passages do not support |
+
+Enterprise retrieval is not a credential store, whatever the corpus happens to contain.
+
 Agents with no configuration under `configs/` are unaffected: the rail node reports itself
 skipped and the run proceeds.
 
@@ -88,7 +125,56 @@ blocks instead:
 |---|---|
 | A rail action raises | Blocked. NeMo's dispatcher logs an action exception and returns `None`, which Colang reads as "nothing found" — so every detector is wrapped at *registration* rather than at definition, and a crash becomes a `rail_error` block |
 | The rail config will not load, or `nemoguardrails` is not installed | Blocked, with `rails_unavailable` naming the reason |
-| The LLM-backed rail cannot reach a model | Blocked |
+| An LLM-backed rail errors on a request while the provider is otherwise healthy | Blocked |
+
+### The one case that must *not* block: an unreachable provider
+
+There is a difference between a rail that failed on this request and a rail engine that is
+systematically unavailable, and they deserve opposite treatment.
+
+`configured` only means the provider's settings are non-empty. A rotated, mistyped or
+placeholder credential leaves a provider looking configured while every call fails — and
+because rails fail closed, that would block **all** traffic on **every** railed agent. That
+is an outage, not a safety measure.
+
+So availability is judged by `router.usable_providers()`: configured **and** not
+circuit-broken. When no provider is usable the model-judged flows are removed from the
+configuration and the deterministic rails carry on — they need no credentials, and they are
+the ones enforcing injection, control bypass, fair lending, collections conduct, tipping
+off, due-diligence integrity, market conduct and PII disclosure. Connected Services reports
+the degradation with a reason an operator can act on:
+
+```json
+{
+  "llm_backed_rails": false,
+  "llm_rails_reason": "provider(s) bedrock are configured but unreachable (circuit open); deterministic rails continue to run",
+  "providers_configured": ["bedrock"],
+  "providers_usable": []
+}
+```
+
+Rails are cached per `(agent, llm_rails_on)`, so a provider coming back does not leave the
+degraded configuration in front of it.
+
+## Verifying the model-dependent layer
+
+Everything above that needs no model is covered by the test suite. The parts that do need
+one — a live completion and the LLM-backed rails — cannot be proven in an environment
+without a provider, so the platform says which those are instead of implying they work:
+
+```bash
+cd backend && python -m app.cli verify-provider
+```
+
+```
+  PASS  provider_configured             configured: bedrock
+  PASS  provider_reachable              usable: bedrock
+  FAIL  live_completion                 ProviderError: Bedrock returned 403
+  ----  llm_rails::credit_risk          provider(s) bedrock are configured but unreachable
+  ----  conformance_suite               cannot run until a live completion succeeds
+```
+
+Exit code 0 when everything is verified, 1 on a failure, 2 while anything is unproven.
 
 The only way to run these agents without rails is to say so: `NEMO_GUARDRAILS_ENABLED=false`,
 which is a recorded configuration decision and is reported in Connected Services.

@@ -17,7 +17,7 @@ Seven agents are implemented end to end. Eight more are registered and clearly m
 | 67 tools over the banking system of record | Working — schema-validated, timed, health-tracked, approval-gated where it matters |
 | Hybrid RAG (vector + BM25) with citations | Working — Qdrant when configured, exact cosine in-database otherwise |
 | Human approvals that suspend and resume real executions | Working, with segregation of duties and a full decision timeline |
-| NeMo Guardrails rails on four production agents (injection, control bypass, unlicensed advice, financial-crime facilitation, tipping off, PII disclosure, fair lending, collections conduct) | Working — deterministic rails need no credentials, LLM-backed rails route through the model router, and every failure mode blocks rather than passes |
+| NeMo Guardrails rails on **all seven** implemented agents (injection, control bypass, unlicensed advice, financial-crime facilitation, tipping off, fair lending, collections conduct, due-diligence integrity, market abuse, corpus exfiltration, PII disclosure) | Working — deterministic rails need no credentials and hold even when the model layer is unreachable; a rail that cannot be evaluated blocks, a provider that cannot be reached degrades |
 | Cost ledger by agent / model / provider / user / department / tool | Working, with forecasting and budget alerts |
 | Geography: transaction corridors, customer locations and jurisdiction risk on a rotating globe | Working — aggregated from the ledger, coordinates from a static ISO-3166 reference |
 | RBAC, API keys, MFA (TOTP), Keycloak SSO, audit trail, secrets, feature flags | Working |
@@ -87,6 +87,17 @@ npm run dev:console     # application 2 — http://localhost:5173
 SQLite is the default so a laptop needs no infrastructure. Point `DATABASE_URL` at
 PostgreSQL for anything beyond development.
 
+### Check what the model layer can actually do
+
+```bash
+cd backend
+.venv/bin/python -m app.cli verify-provider
+```
+
+Reports which model-dependent paths — a live completion, the LLM-backed rails per agent,
+the conformance suite — are verified and which are still unproven, and exits non-zero while
+any remain. Everything that needs no model is covered by the test suite instead.
+
 ### Run an agent from the CLI
 
 ```bash
@@ -149,12 +160,14 @@ implements the RBI asset-classification ladder including the SMA sub-grades, and
 Practices Code contact rules — evaluated in the bank's local time, not UTC. Details in
 [`docs/CREDIT_AND_COLLECTIONS.md`](docs/CREDIT_AND_COLLECTIONS.md).
 
-**Customer Service**, **AML Investigation**, **Credit Risk** and **Collections** carry
-[NeMo Guardrails](docs/GUARDRAILS.md) rail configurations: input rails that refuse a request
-before anything reads a system of record, and output rails that mask identifiers, block
-tipping off, refuse reasoning from a protected characteristic and refuse collections
-threats. Rails fail closed, so an agent that declares them is refused rather than executed
-unguarded.
+**Every implemented agent** carries a [NeMo Guardrails](docs/GUARDRAILS.md) rail
+configuration — an implemented agent with no rails is an ungoverned production surface, and
+a test asserts none exists. Input rails refuse a request before anything reads a system of
+record; output rails mask identifiers, block tipping off, refuse reasoning from a protected
+characteristic, refuse collections threats, refuse a promised return and refuse credential
+extraction from the corpus. Rails fail closed — with one deliberate exception: a provider
+that is configured but unreachable degrades the model-judged layer rather than blocking all
+traffic, because the deterministic rails need no credentials and keep enforcing.
 
 ### Roadmap agents (registered, not executable)
 

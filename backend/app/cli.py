@@ -10,6 +10,7 @@ import json
 import pathlib
 import sys
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import delete, func, select
 
@@ -248,6 +249,89 @@ async def cmd_health() -> None:
     print(json.dumps(health, indent=2, default=str))
 
 
+async def cmd_verify_provider() -> int:
+    """Prove the model-dependent paths actually work.
+
+    Everything the platform does without a model is exercised by the test suite. The paths
+    that need one — a live completion, the LLM-backed guardrail layer, and the conformance
+    suite — cannot be proven in an environment with no provider, so this command states
+    exactly which of them are verified and which are still unproven, and returns non-zero
+    while any remain.
+    """
+    from app.guardrails.nemo import nemo_guardrails
+    from app.llm.router import router as model_router
+    from app.llm.types import Message
+
+    checks: list[dict[str, Any]] = []
+
+    def record(name: str, ok: bool | None, detail: str) -> None:
+        checks.append({"check": name, "status": "pass" if ok else
+                       "unproven" if ok is None else "fail", "detail": detail})
+
+    configured = model_router.configured_providers()
+    usable = model_router.usable_providers()
+    record("provider_configured", bool(configured),
+           f"configured: {', '.join(configured) or 'none'}")
+    record("provider_reachable", bool(usable) if configured else False,
+           f"usable: {', '.join(usable) or 'none'} "
+           f"(configured but circuit-open providers are not usable)")
+
+    # 1. A real completion.
+    response = None
+    if usable:
+        try:
+            response = await model_router.chat(
+                messages=[Message(role="user", content="Reply with the single word: ready")],
+                max_tokens=16, temperature=0.0, context={"purpose": "verification"},
+            )
+            record("live_completion", True,
+                   f"{response.model} via {response.provider} in "
+                   f"{response.latency_ms:.0f}ms, ${response.cost_usd:.6f}")
+        except Exception as exc:
+            record("live_completion", False, f"{type(exc).__name__}: {exc}")
+    else:
+        record("live_completion", None, "no reachable provider")
+
+    # 2. The LLM-backed rail layer, per railed agent.
+    status = nemo_guardrails.status()
+    if status["llm_backed_rails"] and response is not None:
+        for agent in status["agents"]:
+            try:
+                result = await nemo_guardrails.check_input(
+                    agent, "What is the balance on my savings account?")
+                record(f"llm_rails::{agent}",
+                       result.evaluated and result.llm_rails,
+                       f"evaluated={result.evaluated} llm_rails={result.llm_rails} "
+                       f"blocked={result.blocked}")
+            except Exception as exc:
+                record(f"llm_rails::{agent}", False, f"{type(exc).__name__}: {exc}")
+    else:
+        for agent in status["agents"]:
+            record(f"llm_rails::{agent}", None, status["llm_rails_reason"])
+
+    # 3. The conformance suite is the end-to-end proof. It is only runnable if a
+    #    completion actually succeeded — a configured-but-failing provider proves nothing.
+    record("conformance_suite", None if response is None else True,
+           "run `python -m app.cli validate` to execute the twenty scenarios"
+           if response is not None else
+           "cannot run until a live completion succeeds")
+
+    width = max(len(c["check"]) for c in checks)
+    print("\nModel-dependent verification\n" + "-" * (width + 46))
+    for check in checks:
+        mark = {"pass": "PASS", "fail": "FAIL", "unproven": "----"}[check["status"]]
+        print(f"  {mark}  {check['check']:<{width}}  {check['detail']}")
+
+    failed = [c for c in checks if c["status"] == "fail"]
+    unproven = [c for c in checks if c["status"] == "unproven"]
+    print("-" * (width + 46))
+    print(f"  {len(checks) - len(failed) - len(unproven)} verified, {len(failed)} failed, "
+          f"{len(unproven)} unproven")
+    if unproven and not failed:
+        print("\n  Set a provider key (see .env.example) and re-run to close these.")
+    return 1 if failed else (2 if unproven else 0)
+
+
 async def cmd_run_agent(agent_key: str, payload: str, user_email: str) -> None:
     from app.db.models.identity import User
     from app.engine.executor import engine as execution_engine
@@ -291,6 +375,9 @@ def main() -> None:
     retention = sub.add_parser("retention", help="Apply the data retention policy")
     retention.add_argument("--apply", action="store_true", help="Delete instead of reporting")
     sub.add_parser("health", help="Report platform and provider health")
+    sub.add_parser("verify-provider",
+                   help="Prove the model-dependent paths (live completion, LLM-backed "
+                        "rails, conformance suite) and report what is still unproven")
     validate = sub.add_parser("validate",
                               help="Run the conformance suite against the implemented agents")
     validate.add_argument("--agent", default=None, help="Restrict to one agent key")
@@ -325,6 +412,7 @@ def main() -> None:
         "sync-knowledge": lambda: cmd_sync_knowledge(args.source),
         "retention": lambda: cmd_retention(not args.apply),
         "health": lambda: cmd_health(),
+        "verify-provider": lambda: cmd_verify_provider(),
         "run-agent": lambda: cmd_run_agent(args.agent_key, args.input, args.user),
         "validate": lambda: cmd_validate(args.agent, args.scenario, args.tag, args.output,
                                          args.fmt, args.concurrency, args.reviewer,

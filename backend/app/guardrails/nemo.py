@@ -87,7 +87,9 @@ class NemoGuardrails:
 
     def __init__(self, root: Path | None = None):
         self._root = root or CONFIG_ROOT
-        self._rails: dict[str, Any] = {}
+        #: Keyed by (agent, llm_rails_on) so a provider coming back does not leave the
+        #: deterministic-only configuration cached in front of it.
+        self._rails: dict[tuple[str, bool], Any] = {}
         self._errors: dict[str, str] = {}
         self._lock = asyncio.Lock()
         self._import_error: str | None = None
@@ -106,21 +108,30 @@ class NemoGuardrails:
         ).is_file()
 
     def _llm_rails_available(self) -> bool:
-        """LLM-backed rails need both a configured provider and the operator's consent."""
+        """LLM-backed rails need the operator's consent and a provider that can be reached.
+
+        `configured` is not enough. A rotated or placeholder credential leaves a provider
+        looking configured while every call fails, and because rails fail closed that would
+        block *all* traffic on every railed agent — an outage, not a safety measure. The
+        deterministic rails need no credentials and keep running, so the right response to
+        an unreachable provider is to drop the model-judged layer and say so.
+        """
         from app.llm.router import router as model_router
 
-        return settings.nemo_llm_rails_enabled and bool(model_router.configured_providers())
+        return settings.nemo_llm_rails_enabled and bool(model_router.usable_providers())
 
     # --- loading -------------------------------------------------------------
     async def _load(self, agent_key: str) -> Any | None:
-        if agent_key in self._rails:
-            return self._rails[agent_key]
+        has_llm = self._llm_rails_available()
+        cache_key = (agent_key, has_llm)
+        if cache_key in self._rails:
+            return self._rails[cache_key]
         if agent_key in self._errors:
             return None
 
         async with self._lock:
-            if agent_key in self._rails:
-                return self._rails[agent_key]
+            if cache_key in self._rails:
+                return self._rails[cache_key]
             try:
                 from nemoguardrails import LLMRails, RailsConfig
             except ImportError as exc:  # pragma: no cover - depends on the extra
@@ -134,7 +145,6 @@ class NemoGuardrails:
             path = self._root / agent_key
             try:
                 config = RailsConfig.from_path(str(path))
-                has_llm = self._llm_rails_available()
                 if not has_llm:
                     _strip_llm_flows(config)
                 rails = LLMRails(config, llm=_router_llm(agent_key) if has_llm else None)
@@ -149,7 +159,7 @@ class NemoGuardrails:
                 log.error("nemo_rails_load_failed", agent=agent_key, error=str(exc))
                 return None
 
-            self._rails[agent_key] = rails
+            self._rails[cache_key] = rails
             log.info("nemo_rails_loaded", agent=agent_key, llm_rails=has_llm)
             return rails
 
@@ -217,8 +227,12 @@ class NemoGuardrails:
         except ImportError:
             version, installed = None, False
 
+        from app.llm.router import router as model_router
+
         agents = self.configured_agents()
         llm_rails = self._llm_rails_available() if installed else False
+        configured = model_router.configured_providers()
+        usable = model_router.usable_providers()
         if not settings.nemo_guardrails_enabled:
             state = "disabled"
         elif not installed:
@@ -237,13 +251,28 @@ class NemoGuardrails:
             "installed": installed,
             "version": version,
             "agents": agents,
-            "loaded": sorted(self._rails),
+            "loaded": sorted({agent for agent, _ in self._rails}),
             "llm_backed_rails": llm_rails,
+            "llm_rails_reason": _llm_rails_reason(llm_rails, configured, usable),
+            "providers_configured": configured,
+            "providers_usable": usable,
             "note": None if llm_rails else
             "LLM-backed rails are off — deterministic rails only",
             "errors": dict(self._errors) or None,
             "required": ["nemoguardrails"] if not installed else [],
         }
+
+
+def _llm_rails_reason(enabled: bool, configured: list[str], usable: list[str]) -> str:
+    """Why the model-judged rails are or are not running, in one line an operator can act on."""
+    if enabled:
+        return f"running on {', '.join(usable)}"
+    if not settings.nemo_llm_rails_enabled:
+        return "disabled by NEMO_LLM_RAILS_ENABLED"
+    if not configured:
+        return "no LLM provider is configured"
+    return (f"provider(s) {', '.join(configured)} are configured but unreachable "
+            f"(circuit open); deterministic rails continue to run")
 
 
 def _router_llm(agent_key: str) -> Any:

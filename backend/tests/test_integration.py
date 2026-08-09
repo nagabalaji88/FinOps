@@ -315,8 +315,11 @@ class TestExecutionEngine:
         execution = await _wait_for(client, auth, execution_id,
                                     {"succeeded", "failed", "cancelled"})
         assert execution["status"] == "succeeded", execution.get("error")
-        assert execution["node_path"][0] == "planner"
-        assert "response" in execution["node_path"]
+        # Every railed agent starts at the guardrail node; the graph then runs in order.
+        path = execution["node_path"]
+        assert path[0] == "input_rails", "a railed agent must be guarded before it plans"
+        assert path.index("planner") < path.index("response")
+        assert "response" in path
         assert execution["llm_call_count"] >= 2
         assert execution["cost_usd"] > 0
         assert execution["final_response"]
