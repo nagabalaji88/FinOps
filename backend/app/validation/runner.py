@@ -153,8 +153,11 @@ class ValidationReport:
                 {"total": 0, "passed": 0, "failed": 0, "blocked": 0, "errored": 0},
             )
             bucket["total"] += 1
-            bucket[{"passed": "passed", "failed": "failed", "blocked": "blocked",
-                    "error": "errored"}[result.verdict]] += 1
+            bucket[
+                {"passed": "passed", "failed": "failed", "blocked": "blocked", "error": "errored"}[
+                    result.verdict
+                ]
+            ] += 1
         return out
 
 
@@ -179,8 +182,7 @@ async def prepare_environment(scenarios: list[Scenario], *, seed_sample: bool = 
             result = await bootstrap(session)
             steps.append({"step": "platform_seed", "action": "seeded", **result})
         else:
-            steps.append({"step": "platform_seed", "action": "already_present",
-                          "agents": registered})
+            steps.append({"step": "platform_seed", "action": "already_present", "agents": registered})
 
     needs_sample = any(s.requires_sample_data for s in scenarios)
     if needs_sample and seed_sample:
@@ -190,8 +192,7 @@ async def prepare_environment(scenarios: list[Scenario], *, seed_sample: bool = 
                 result = await seed_sample_banking(session)
                 steps.append({"step": "sample_banking", "action": "seeded", **result})
             else:
-                steps.append({"step": "sample_banking", "action": "already_present",
-                              "customers": customers})
+                steps.append({"step": "sample_banking", "action": "already_present", "customers": customers})
     elif needs_sample:
         steps.append({"step": "sample_banking", "action": "skipped"})
 
@@ -220,13 +221,8 @@ class ValidationRunner:
     async def preflight(self, scenarios: list[Scenario]) -> dict[str, Any]:
         providers = model_router.configured_providers()
         async with session_scope() as session:
-            agents = {
-                a.key: a
-                for a in (await session.execute(select(Agent))).scalars().all()
-            }
-            customers = int(
-                (await session.execute(select(func.count(Customer.id)))).scalar_one()
-            )
+            agents = {a.key: a for a in (await session.execute(select(Agent))).scalars().all()}
+            customers = int((await session.execute(select(func.count(Customer.id)))).scalar_one())
             reviewer = (
                 await session.execute(select(User).where(User.email == self.reviewer_email))
             ).scalar_one_or_none()
@@ -234,13 +230,11 @@ class ValidationRunner:
         required_agents = sorted({s.agent_key for s in scenarios})
         missing = [key for key in required_agents if key not in agents]
         inactive = [
-            key
-            for key in required_agents
-            if key in agents and agents[key].lifecycle_state != "active"
+            key for key in required_agents if key in agents and agents[key].lifecycle_state != "active"
         ]
         needs_sample = any(s.requires_sample_data for s in scenarios)
 
-        report = {
+        report: dict[str, Any] = {
             "configured_providers": providers,
             "llm_available": bool(providers),
             "agents_required": required_agents,
@@ -252,22 +246,22 @@ class ValidationRunner:
             "reviewer_email": self.reviewer_email,
             "warnings": [],
         }
+        warnings: list[str] = report["warnings"]
         if not providers:
-            report["warnings"].append(
+            warnings.append(
                 "No LLM provider is configured. Agent executions will fail with "
                 "provider_not_configured and every scenario will report BLOCKED."
             )
         if needs_sample and customers == 0:
-            report["warnings"].append(
-                "Scenarios require the sample banking dataset. Run "
-                "`python -m app.cli seed-banking` first."
+            warnings.append(
+                "Scenarios require the sample banking dataset. Run `python -m app.cli seed-banking` first."
             )
         if missing:
-            report["warnings"].append(f"Agents not registered: {missing}")
+            warnings.append(f"Agents not registered: {missing}")
         if inactive:
-            report["warnings"].append(f"Agents not active: {inactive}")
+            warnings.append(f"Agents not active: {inactive}")
         if reviewer is None:
-            report["warnings"].append(
+            warnings.append(
                 f"Reviewer '{self.reviewer_email}' not found; approval scenarios cannot be decided."
             )
         return report
@@ -338,7 +332,7 @@ class ValidationRunner:
                 verdict="error",
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 note=f"execution {execution_id} did not reach a terminal state within "
-                     f"{self.execution_timeout:.0f}s",
+                f"{self.execution_timeout:.0f}s",
             )
         except Exception as exc:
             return ScenarioResult(
@@ -366,8 +360,9 @@ class ValidationRunner:
         # scenario proving a rail fires is still meaningful, and must be judged normally.
         if observed.status == "failed" and scenario.expect.status != "failed":
             infra = next(
-                (f for f in observed.guardrail_findings
-                 if str(f.get("rule")) in RAIL_INFRASTRUCTURE_RULES), None)
+                (f for f in observed.guardrail_findings if str(f.get("rule")) in RAIL_INFRASTRUCTURE_RULES),
+                None,
+            )
             if infra is not None:
                 return ScenarioResult(
                     scenario=scenario,
@@ -439,12 +434,16 @@ class ValidationRunner:
     ) -> str | None:
         async with session_scope() as session:
             approval = (
-                await session.execute(
-                    select(Approval)
-                    .where(Approval.execution_id == execution_id, Approval.status == "pending")
-                    .order_by(Approval.created_at)
+                (
+                    await session.execute(
+                        select(Approval)
+                        .where(Approval.execution_id == execution_id, Approval.status == "pending")
+                        .order_by(Approval.created_at)
+                    )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             if approval is None or approval.id in already_decided:
                 return None
 
@@ -495,15 +494,19 @@ class ValidationRunner:
                 await session.execute(select(Execution).where(Execution.id == execution_id))
             ).scalar_one()
             spans = (
-                await session.execute(
-                    select(Span).where(Span.execution_id == execution_id).order_by(Span.start_time)
+                (
+                    await session.execute(
+                        select(Span).where(Span.execution_id == execution_id).order_by(Span.start_time)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             approvals = (
-                await session.execute(
-                    select(Approval).where(Approval.execution_id == execution_id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Approval).where(Approval.execution_id == execution_id)))
+                .scalars()
+                .all()
+            )
 
             output = execution.output or {}
             # A run the rails refused never produces an output, so its findings live only in
@@ -512,17 +515,21 @@ class ValidationRunner:
             guardrail_findings = list(output.get("guardrails") or [])
             if not guardrail_findings:
                 events = (
-                    await session.execute(
-                        select(ExecutionEvent)
-                        .where(ExecutionEvent.execution_id == execution_id,
-                               ExecutionEvent.type == "guardrail")
-                        .order_by(ExecutionEvent.sequence)
+                    (
+                        await session.execute(
+                            select(ExecutionEvent)
+                            .where(
+                                ExecutionEvent.execution_id == execution_id,
+                                ExecutionEvent.type == "guardrail",
+                            )
+                            .order_by(ExecutionEvent.sequence)
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 guardrail_findings = [
-                    finding
-                    for event in events
-                    for finding in (event.payload or {}).get("findings") or []
+                    finding for event in events for finding in (event.payload or {}).get("findings") or []
                 ]
 
             tool_invocations = [

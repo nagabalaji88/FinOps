@@ -58,9 +58,7 @@ async def record_cost(record: dict[str, Any]) -> None:
         log.warning("cost_record_failed", error=str(exc))
 
 
-async def _update_tool_health(
-    session: AsyncSession, tool_name: str, result: ToolResult, status: str
-) -> None:
+async def _update_tool_health(session: AsyncSession, tool_name: str, result: ToolResult, status: str) -> None:
     row = (
         await session.execute(select(ToolHealth).where(ToolHealth.tool_name == tool_name))
     ).scalar_one_or_none()

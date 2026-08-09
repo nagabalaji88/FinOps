@@ -39,6 +39,7 @@ def _validate_email(value: str) -> str:
         raise ValueError("value is not a valid email address")
     return value
 
+
 MAX_FAILED_LOGINS = 5
 LOCKOUT_MINUTES = 15
 
@@ -65,31 +66,54 @@ async def login(payload: LoginRequest, request: Request, session: SessionDep) ->
         await session.execute(select(User).where(func.lower(User.email) == payload.email.lower()))
     ).scalar_one_or_none()
     if user is None or not user.hashed_password:
-        await write_audit(session, principal=None, action="auth.login", resource_type="user",
-                          resource_id=payload.email, outcome="failure", severity="warning",
-                          details={"reason": "unknown_user"}, request=request)
+        await write_audit(
+            session,
+            principal=None,
+            action="auth.login",
+            resource_type="user",
+            resource_id=payload.email,
+            outcome="failure",
+            severity="warning",
+            details={"reason": "unknown_user"},
+            request=request,
+        )
         raise AuthError("Invalid credentials")
     if user.locked_until and user.locked_until > datetime.now(UTC):
-        raise ForbiddenError("Account temporarily locked",
-                             details={"locked_until": user.locked_until.isoformat()})
+        raise ForbiddenError(
+            "Account temporarily locked", details={"locked_until": user.locked_until.isoformat()}
+        )
     if not user.is_active:
         raise ForbiddenError("Account is disabled")
     if not verify_password(payload.password, user.hashed_password):
         user.failed_login_count += 1
         if user.failed_login_count >= MAX_FAILED_LOGINS:
             user.locked_until = datetime.now(UTC) + timedelta(minutes=LOCKOUT_MINUTES)
-        await write_audit(session, principal=None, action="auth.login", resource_type="user",
-                          resource_id=user.id, outcome="failure", severity="warning",
-                          details={"reason": "bad_password",
-                                   "attempts": user.failed_login_count}, request=request)
+        await write_audit(
+            session,
+            principal=None,
+            action="auth.login",
+            resource_type="user",
+            resource_id=user.id,
+            outcome="failure",
+            severity="warning",
+            details={"reason": "bad_password", "attempts": user.failed_login_count},
+            request=request,
+        )
         raise AuthError("Invalid credentials")
     if user.mfa_enabled:
         if not payload.mfa_code:
             raise AuthError("MFA code required", details={"mfa_required": True})
         if not verify_totp(user.mfa_secret or "", payload.mfa_code):
-            await write_audit(session, principal=None, action="auth.mfa", resource_type="user",
-                              resource_id=user.id, outcome="failure", severity="warning",
-                              request=request)
+            await write_audit(
+                session,
+                principal=None,
+                action="auth.mfa",
+                resource_type="user",
+                resource_id=user.id,
+                outcome="failure",
+                severity="warning",
+                request=request,
+            )
             raise AuthError("Invalid MFA code")
 
     user.failed_login_count = 0
@@ -97,7 +121,9 @@ async def login(payload: LoginRequest, request: Request, session: SessionDep) ->
     user.last_login_at = datetime.now(UTC)
 
     access = create_access_token(
-        user_id=user.id, email=user.email, roles=list(user.roles or []),
+        user_id=user.id,
+        email=user.email,
+        roles=list(user.roles or []),
         scopes=sorted(str(p) for p in ROLE_PERMISSIONS.get("viewer", set())),
     )
     refresh = create_refresh_token(user_id=user.id)
@@ -110,12 +136,20 @@ async def login(payload: LoginRequest, request: Request, session: SessionDep) ->
             ip_address=request.client.host if request.client else None,
         )
     )
-    await write_audit(session, principal=None, action="auth.login", resource_type="user",
-                      resource_id=user.id, details={"method": "password"}, request=request)
+    await write_audit(
+        session,
+        principal=None,
+        action="auth.login",
+        resource_type="user",
+        resource_id=user.id,
+        details={"method": "password"},
+        request=request,
+    )
     from app.api.deps import Principal
 
     return TokenResponse(
-        access_token=access, refresh_token=refresh,
+        access_token=access,
+        refresh_token=refresh,
         expires_in=settings.access_token_ttl_seconds,
         user=Principal(user, auth_method="jwt").to_dict(),
     )
@@ -133,14 +167,11 @@ async def refresh_tokens(payload: RefreshRequest, session: SessionDep) -> TokenR
     ).scalar_one_or_none()
     if stored is None or stored.revoked_at is not None:
         raise AuthError("Refresh token is not valid")
-    user = (
-        await session.execute(select(User).where(User.id == claims["sub"]))
-    ).scalar_one_or_none()
+    user = (await session.execute(select(User).where(User.id == claims["sub"]))).scalar_one_or_none()
     if user is None or not user.is_active:
         raise AuthError("User is not active")
     stored.revoked_at = datetime.now(UTC)
-    access = create_access_token(user_id=user.id, email=user.email, roles=list(user.roles or []),
-                                scopes=[])
+    access = create_access_token(user_id=user.id, email=user.email, roles=list(user.roles or []), scopes=[])
     new_refresh = create_refresh_token(user_id=user.id)
     session.add(
         RefreshToken(
@@ -151,9 +182,12 @@ async def refresh_tokens(payload: RefreshRequest, session: SessionDep) -> TokenR
     )
     from app.api.deps import Principal
 
-    return TokenResponse(access_token=access, refresh_token=new_refresh,
-                         expires_in=settings.access_token_ttl_seconds,
-                         user=Principal(user, auth_method="jwt").to_dict())
+    return TokenResponse(
+        access_token=access,
+        refresh_token=new_refresh,
+        expires_in=settings.access_token_ttl_seconds,
+        user=Principal(user, auth_method="jwt").to_dict(),
+    )
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -164,8 +198,9 @@ async def logout(payload: RefreshRequest, session: SessionDep, principal: Princi
     ).scalar_one_or_none()
     if stored is not None:
         stored.revoked_at = datetime.now(UTC)
-    await write_audit(session, principal=principal, action="auth.logout", resource_type="user",
-                      resource_id=principal.id)
+    await write_audit(
+        session, principal=principal, action="auth.logout", resource_type="user", resource_id=principal.id
+    )
 
 
 @router.get("/me")
@@ -183,8 +218,7 @@ async def enrol_mfa(session: SessionDep, principal: PrincipalDep) -> MfaEnrolRes
     secret = new_totp_secret()
     principal.user.mfa_secret = secret
     await session.flush()
-    return MfaEnrolResponse(secret=secret,
-                            provisioning_uri=totp_provisioning_uri(secret, principal.email))
+    return MfaEnrolResponse(secret=secret, provisioning_uri=totp_provisioning_uri(secret, principal.email))
 
 
 class MfaVerifyRequest(BaseModel):
@@ -192,15 +226,21 @@ class MfaVerifyRequest(BaseModel):
 
 
 @router.post("/mfa/verify")
-async def verify_mfa(payload: MfaVerifyRequest, session: SessionDep,
-                     principal: PrincipalDep) -> dict[str, Any]:
+async def verify_mfa(
+    payload: MfaVerifyRequest, session: SessionDep, principal: PrincipalDep
+) -> dict[str, Any]:
     if not principal.user.mfa_secret:
         raise ValidationError("Start MFA enrolment first")
     if not verify_totp(principal.user.mfa_secret, payload.code):
         raise AuthError("Invalid MFA code")
     principal.user.mfa_enabled = True
-    await write_audit(session, principal=principal, action="auth.mfa.enabled",
-                      resource_type="user", resource_id=principal.id)
+    await write_audit(
+        session,
+        principal=principal,
+        action="auth.mfa.enabled",
+        resource_type="user",
+        resource_id=principal.id,
+    )
     return {"mfa_enabled": True}
 
 
@@ -208,8 +248,14 @@ async def verify_mfa(payload: MfaVerifyRequest, session: SessionDep,
 async def disable_mfa(session: SessionDep, principal: PrincipalDep) -> dict[str, Any]:
     principal.user.mfa_enabled = False
     principal.user.mfa_secret = None
-    await write_audit(session, principal=principal, action="auth.mfa.disabled",
-                      resource_type="user", resource_id=principal.id, severity="warning")
+    await write_audit(
+        session,
+        principal=principal,
+        action="auth.mfa.disabled",
+        resource_type="user",
+        resource_id=principal.id,
+        severity="warning",
+    )
     return {"mfa_enabled": False}
 
 
@@ -219,13 +265,20 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.post("/password")
-async def change_password(payload: ChangePasswordRequest, session: SessionDep,
-                          principal: PrincipalDep) -> dict[str, Any]:
+async def change_password(
+    payload: ChangePasswordRequest, session: SessionDep, principal: PrincipalDep
+) -> dict[str, Any]:
     if not verify_password(payload.current_password, principal.user.hashed_password or ""):
         raise AuthError("Current password is incorrect")
     principal.user.hashed_password = hash_password(payload.new_password)
-    await write_audit(session, principal=principal, action="auth.password.changed",
-                      resource_type="user", resource_id=principal.id, severity="warning")
+    await write_audit(
+        session,
+        principal=principal,
+        action="auth.password.changed",
+        resource_type="user",
+        resource_id=principal.id,
+        severity="warning",
+    )
     return {"updated": True}
 
 
@@ -238,8 +291,9 @@ class ApiKeyCreate(BaseModel):
 
 
 @router.post("/api-keys", status_code=status.HTTP_201_CREATED)
-async def create_api_key(payload: ApiKeyCreate, session: SessionDep,
-                         principal: PrincipalDep) -> dict[str, Any]:
+async def create_api_key(
+    payload: ApiKeyCreate, session: SessionDep, principal: PrincipalDep
+) -> dict[str, Any]:
     principal.require(Permission.SECURITY_ADMIN)
     full_key, prefix, hashed = generate_api_key()
     api_key = ApiKey(
@@ -250,13 +304,20 @@ async def create_api_key(payload: ApiKeyCreate, session: SessionDep,
         scopes=payload.scopes,
         rate_limit_per_minute=payload.rate_limit_per_minute,
         expires_at=datetime.now(UTC) + timedelta(days=payload.expires_in_days)
-        if payload.expires_in_days else None,
+        if payload.expires_in_days
+        else None,
     )
     session.add(api_key)
     await session.flush()
-    await write_audit(session, principal=principal, action="apikey.created",
-                      resource_type="api_key", resource_id=api_key.id, severity="warning",
-                      details={"name": payload.name})
+    await write_audit(
+        session,
+        principal=principal,
+        action="apikey.created",
+        resource_type="api_key",
+        resource_id=api_key.id,
+        severity="warning",
+        details={"name": payload.name},
+    )
     return {
         "id": api_key.id,
         "name": api_key.name,
@@ -273,28 +334,36 @@ async def list_api_keys(session: SessionDep, principal: PrincipalDep) -> list[di
     keys = (await session.execute(select(ApiKey).order_by(ApiKey.created_at.desc()))).scalars().all()
     return [
         {
-            "id": k.id, "name": k.name, "prefix": k.prefix, "scopes": k.scopes,
-            "rate_limit_per_minute": k.rate_limit_per_minute, "usage_count": k.usage_count,
+            "id": k.id,
+            "name": k.name,
+            "prefix": k.prefix,
+            "scopes": k.scopes,
+            "rate_limit_per_minute": k.rate_limit_per_minute,
+            "usage_count": k.usage_count,
             "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
             "expires_at": k.expires_at.isoformat() if k.expires_at else None,
-            "revoked": k.revoked_at is not None, "created_at": k.created_at.isoformat(),
+            "revoked": k.revoked_at is not None,
+            "created_at": k.created_at.isoformat(),
         }
         for k in keys
     ]
 
 
 @router.delete("/api-keys/{key_id}")
-async def revoke_api_key(key_id: str, session: SessionDep,
-                         principal: PrincipalDep) -> dict[str, Any]:
+async def revoke_api_key(key_id: str, session: SessionDep, principal: PrincipalDep) -> dict[str, Any]:
     principal.require(Permission.SECURITY_ADMIN)
-    api_key = (
-        await session.execute(select(ApiKey).where(ApiKey.id == key_id))
-    ).scalar_one_or_none()
+    api_key = (await session.execute(select(ApiKey).where(ApiKey.id == key_id))).scalar_one_or_none()
     if api_key is None:
         raise NotFoundError("API key not found")
     api_key.revoked_at = datetime.now(UTC)
-    await write_audit(session, principal=principal, action="apikey.revoked",
-                      resource_type="api_key", resource_id=key_id, severity="warning")
+    await write_audit(
+        session,
+        principal=principal,
+        action="apikey.revoked",
+        resource_type="api_key",
+        resource_id=key_id,
+        severity="warning",
+    )
     return {"revoked": True, "id": key_id}
 
 
@@ -310,28 +379,36 @@ class UserCreate(BaseModel):
 
 
 @router.post("/users", status_code=status.HTTP_201_CREATED)
-async def create_user(payload: UserCreate, session: SessionDep,
-                      principal: PrincipalDep) -> dict[str, Any]:
+async def create_user(payload: UserCreate, session: SessionDep, principal: PrincipalDep) -> dict[str, Any]:
     principal.require(Permission.USER_ADMIN)
     unknown = [r for r in payload.roles if r not in ROLE_PERMISSIONS]
     if unknown:
-        raise ValidationError("Unknown role(s)", details={"unknown": unknown,
-                                                          "valid": sorted(ROLE_PERMISSIONS)})
+        raise ValidationError(
+            "Unknown role(s)", details={"unknown": unknown, "valid": sorted(ROLE_PERMISSIONS)}
+        )
     existing = (
         await session.execute(select(User).where(func.lower(User.email) == payload.email.lower()))
     ).scalar_one_or_none()
     if existing:
         raise ConflictError("A user with that email already exists")
     user = User(
-        email=payload.email.lower(), full_name=payload.full_name,
-        hashed_password=hash_password(payload.password), roles=payload.roles,
+        email=payload.email.lower(),
+        full_name=payload.full_name,
+        hashed_password=hash_password(payload.password),
+        roles=payload.roles,
         department=payload.department,
     )
     session.add(user)
     await session.flush()
-    await write_audit(session, principal=principal, action="user.created", resource_type="user",
-                      resource_id=user.id, severity="warning",
-                      details={"roles": payload.roles})
+    await write_audit(
+        session,
+        principal=principal,
+        action="user.created",
+        resource_type="user",
+        resource_id=user.id,
+        severity="warning",
+        details={"roles": payload.roles},
+    )
     return {"id": user.id, "email": user.email, "roles": user.roles}
 
 
@@ -341,9 +418,14 @@ async def list_users(session: SessionDep, principal: PrincipalDep) -> list[dict[
     users = (await session.execute(select(User).order_by(User.created_at))).scalars().all()
     return [
         {
-            "id": u.id, "email": u.email, "full_name": u.full_name, "roles": u.roles,
-            "department": u.department, "is_active": u.is_active,
-            "mfa_enabled": u.mfa_enabled, "is_service_account": u.is_service_account,
+            "id": u.id,
+            "email": u.email,
+            "full_name": u.full_name,
+            "roles": u.roles,
+            "department": u.department,
+            "is_active": u.is_active,
+            "mfa_enabled": u.mfa_enabled,
+            "is_service_account": u.is_service_account,
             "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
             "locked": bool(u.locked_until and u.locked_until > datetime.now(UTC)),
         }
@@ -358,8 +440,9 @@ class UserUpdate(BaseModel):
 
 
 @router.patch("/users/{user_id}")
-async def update_user(user_id: str, payload: UserUpdate, session: SessionDep,
-                      principal: PrincipalDep) -> dict[str, Any]:
+async def update_user(
+    user_id: str, payload: UserUpdate, session: SessionDep, principal: PrincipalDep
+) -> dict[str, Any]:
     principal.require(Permission.USER_ADMIN)
     user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if user is None:
@@ -373,11 +456,16 @@ async def update_user(user_id: str, payload: UserUpdate, session: SessionDep,
         user.is_active = payload.is_active
     if payload.department is not None:
         user.department = payload.department
-    await write_audit(session, principal=principal, action="user.updated", resource_type="user",
-                      resource_id=user_id, severity="warning",
-                      details=payload.model_dump(exclude_none=True))
-    return {"id": user.id, "roles": user.roles, "is_active": user.is_active,
-            "department": user.department}
+    await write_audit(
+        session,
+        principal=principal,
+        action="user.updated",
+        resource_type="user",
+        resource_id=user_id,
+        severity="warning",
+        details=payload.model_dump(exclude_none=True),
+    )
+    return {"id": user.id, "roles": user.roles, "is_active": user.is_active, "department": user.department}
 
 
 @router.get("/roles")
@@ -395,21 +483,26 @@ async def list_roles(principal: PrincipalDep) -> list[dict[str, Any]]:
 
 @router.get("/sso")
 async def sso_configuration() -> dict[str, Any]:
-    configured = bool(settings.keycloak_url and settings.keycloak_realm
-                      and settings.keycloak_client_id)
+    configured = bool(settings.keycloak_url and settings.keycloak_realm and settings.keycloak_client_id)
     info: dict[str, Any] = {"provider": "keycloak", "configured": configured}
     if configured:
         base = f"{settings.keycloak_url.rstrip('/')}/realms/{settings.keycloak_realm}"
-        info.update({
-            "issuer": base,
-            "authorization_endpoint": f"{base}/protocol/openid-connect/auth",
-            "token_endpoint": f"{base}/protocol/openid-connect/token",
-            "jwks_uri": f"{base}/protocol/openid-connect/certs",
-            "client_id": settings.keycloak_client_id,
-        })
+        info.update(
+            {
+                "issuer": base,
+                "authorization_endpoint": f"{base}/protocol/openid-connect/auth",
+                "token_endpoint": f"{base}/protocol/openid-connect/token",
+                "jwks_uri": f"{base}/protocol/openid-connect/certs",
+                "client_id": settings.keycloak_client_id,
+            }
+        )
     else:
-        info["required_settings"] = ["KEYCLOAK_URL", "KEYCLOAK_REALM", "KEYCLOAK_CLIENT_ID",
-                                     "KEYCLOAK_CLIENT_SECRET"]
+        info["required_settings"] = [
+            "KEYCLOAK_URL",
+            "KEYCLOAK_REALM",
+            "KEYCLOAK_CLIENT_ID",
+            "KEYCLOAK_CLIENT_SECRET",
+        ]
     return info
 
 
@@ -419,8 +512,7 @@ class SsoExchangeRequest(BaseModel):
 
 
 @router.post("/sso/callback", response_model=TokenResponse)
-async def sso_callback(payload: SsoExchangeRequest, session: SessionDep,
-                       request: Request) -> TokenResponse:
+async def sso_callback(payload: SsoExchangeRequest, session: SessionDep, request: Request) -> TokenResponse:
     if not (settings.keycloak_url and settings.keycloak_realm and settings.keycloak_client_id):
         raise ValidationError("SSO is not configured on this deployment")
     from app.llm.base import http_client
@@ -429,8 +521,10 @@ async def sso_callback(payload: SsoExchangeRequest, session: SessionDep,
     resp = await http_client().post(
         f"{base}/protocol/openid-connect/token",
         data={
-            "grant_type": "authorization_code", "code": payload.code,
-            "redirect_uri": payload.redirect_uri, "client_id": settings.keycloak_client_id,
+            "grant_type": "authorization_code",
+            "code": payload.code,
+            "redirect_uri": payload.redirect_uri,
+            "client_id": settings.keycloak_client_id,
             "client_secret": settings.keycloak_client_secret or "",
         },
         timeout=30.0,
@@ -440,7 +534,8 @@ async def sso_callback(payload: SsoExchangeRequest, session: SessionDep,
     tokens = resp.json()
     userinfo = await http_client().get(
         f"{base}/protocol/openid-connect/userinfo",
-        headers={"Authorization": f"Bearer {tokens['access_token']}"}, timeout=30.0,
+        headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        timeout=30.0,
     )
     if userinfo.status_code >= 400:
         raise AuthError("Unable to read SSO user profile")
@@ -448,28 +543,42 @@ async def sso_callback(payload: SsoExchangeRequest, session: SessionDep,
     email = (profile.get("email") or "").lower()
     if not email:
         raise AuthError("SSO profile has no email claim")
-    user = (
-        await session.execute(select(User).where(func.lower(User.email) == email))
-    ).scalar_one_or_none()
+    user = (await session.execute(select(User).where(func.lower(User.email) == email))).scalar_one_or_none()
     if user is None:
-        user = User(email=email, full_name=profile.get("name") or email, roles=["viewer"],
-                    sso_subject=profile.get("sub"), sso_provider="keycloak")
+        user = User(
+            email=email,
+            full_name=profile.get("name") or email,
+            roles=["viewer"],
+            sso_subject=profile.get("sub"),
+            sso_provider="keycloak",
+        )
         session.add(user)
         await session.flush()
     user.last_login_at = datetime.now(UTC)
     user.sso_subject = profile.get("sub")
     user.sso_provider = "keycloak"
-    await write_audit(session, principal=None, action="auth.sso.login", resource_type="user",
-                      resource_id=user.id, request=request)
+    await write_audit(
+        session,
+        principal=None,
+        action="auth.sso.login",
+        resource_type="user",
+        resource_id=user.id,
+        request=request,
+    )
     from app.api.deps import Principal
 
-    access = create_access_token(user_id=user.id, email=user.email, roles=list(user.roles or []),
-                                 scopes=[])
+    access = create_access_token(user_id=user.id, email=user.email, roles=list(user.roles or []), scopes=[])
     refresh = create_refresh_token(user_id=user.id)
-    session.add(RefreshToken(
-        user_id=user.id, jti=decode_token(refresh, expected_type="refresh")["jti"],
-        expires_at=datetime.now(UTC) + timedelta(seconds=settings.refresh_token_ttl_seconds),
-    ))
-    return TokenResponse(access_token=access, refresh_token=refresh,
-                         expires_in=settings.access_token_ttl_seconds,
-                         user=Principal(user, auth_method="sso").to_dict())
+    session.add(
+        RefreshToken(
+            user_id=user.id,
+            jti=decode_token(refresh, expected_type="refresh")["jti"],
+            expires_at=datetime.now(UTC) + timedelta(seconds=settings.refresh_token_ttl_seconds),
+        )
+    )
+    return TokenResponse(
+        access_token=access,
+        refresh_token=refresh,
+        expires_in=settings.access_token_ttl_seconds,
+        user=Principal(user, auth_method="sso").to_dict(),
+    )

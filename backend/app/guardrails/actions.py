@@ -149,11 +149,7 @@ async def sensitive_labels(context: dict[str, Any] | None = None) -> str | None:
     """Which identifier classes were present, for the finding record."""
     text = _text(context, "bot_message")
     allowlist = set((context or {}).get("pii_allowlist") or [])
-    found = [
-        label
-        for label, pattern in PII_PATTERNS
-        if label not in allowlist and pattern.search(text)
-    ]
+    found = [label for label, pattern in PII_PATTERNS if label not in allowlist and pattern.search(text)]
     return f"sensitive_disclosure|{','.join(found)}" if found else None
 
 

@@ -135,9 +135,7 @@ def evaluate(expect: Expectation, observed: ObservedExecution) -> list[CheckResu
 
     # --- content -----------------------------------------------------------
     if not produced_answer:
-        checks.append(
-            CheckResult("response_content", "skip", "no response produced; content not assessed")
-        )
+        checks.append(CheckResult("response_content", "skip", "no response produced; content not assessed"))
     else:
         checks.append(
             CheckResult(
@@ -152,9 +150,7 @@ def evaluate(expect: Expectation, observed: ObservedExecution) -> list[CheckResu
                 CheckResult(
                     "must_match",
                     "pass" if not unmatched else "fail",
-                    "all required patterns present"
-                    if not unmatched
-                    else f"missing patterns: {unmatched}",
+                    "all required patterns present" if not unmatched else f"missing patterns: {unmatched}",
                 )
             )
         if expect.must_not_match:
@@ -177,8 +173,7 @@ def evaluate(expect: Expectation, observed: ObservedExecution) -> list[CheckResu
             CheckResult(
                 "citations_retrieved",
                 "pass" if enough_sources else "fail",
-                f"{len(observed.citations)} sources retrieved "
-                f"(minimum {expect.min_citations})",
+                f"{len(observed.citations)} sources retrieved (minimum {expect.min_citations})",
             )
         )
         checks.append(
@@ -198,9 +193,7 @@ def evaluate(expect: Expectation, observed: ObservedExecution) -> list[CheckResu
             CheckResult(
                 "approval_raised",
                 "pass" if raised else "fail",
-                f"{len(observed.approvals)} approval request(s)"
-                if raised
-                else "no approval was requested",
+                f"{len(observed.approvals)} approval request(s)" if raised else "no approval was requested",
             )
         )
         if expect.approval_on_tool:
@@ -233,18 +226,13 @@ def evaluate(expect: Expectation, observed: ObservedExecution) -> list[CheckResu
             CheckResult(
                 "guardrails_applied",
                 "pass" if not missing else "fail",
-                f"applied {sorted(applied) or 'none'}"
-                + (f"; missing {missing}" if missing else ""),
+                f"applied {sorted(applied) or 'none'}" + (f"; missing {missing}" if missing else ""),
             )
         )
 
     if expect.validation_checks_must_pass:
         by_name = {str(f.get("check")): str(f.get("status")) for f in observed.validation_findings}
-        bad = [
-            name
-            for name in expect.validation_checks_must_pass
-            if by_name.get(name, "missing") != "pass"
-        ]
+        bad = [name for name in expect.validation_checks_must_pass if by_name.get(name, "missing") != "pass"]
         checks.append(
             CheckResult(
                 "engine_validation",

@@ -88,8 +88,11 @@ class AgentSpec:
 
     def render_user_message(self, payload: dict[str, Any]) -> str:
         query = payload.get("query") or payload.get("question") or payload.get("message")
-        extras = {k: v for k, v in payload.items()
-                  if k not in {"query", "question", "message"} and v not in (None, "", [], {})}
+        extras = {
+            k: v
+            for k, v in payload.items()
+            if k not in {"query", "question", "message"} and v not in (None, "", [], {})
+        }
         parts = []
         if query:
             parts.append(str(query))

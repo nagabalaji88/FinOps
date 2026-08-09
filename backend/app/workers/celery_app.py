@@ -75,10 +75,10 @@ def sync_knowledge() -> dict[str, Any]:
         results = []
         async with session_scope() as session:
             sources = (
-                await session.execute(
-                    select(KnowledgeSource).where(KnowledgeSource.enabled.is_(True))
-                )
-            ).scalars().all()
+                (await session.execute(select(KnowledgeSource).where(KnowledgeSource.enabled.is_(True))))
+                .scalars()
+                .all()
+            )
             for source in sources:
                 connector = CONNECTORS.get(source.connector)
                 if connector is None or not connector.configured:
@@ -99,7 +99,8 @@ def run_transaction_monitoring(days: int = 7) -> dict[str, Any]:
     async def run() -> dict[str, Any]:
         async with session_scope() as session:
             result = await registry.invoke(
-                "monitor_transactions", {"days": days, "persist_alerts": True},
+                "monitor_transactions",
+                {"days": days, "persist_alerts": True},
                 ToolContext(agent_key="scheduled_monitoring", session=session, state={}),
             )
             await session.commit()
@@ -122,19 +123,19 @@ def expire_approvals() -> dict[str, Any]:
         expired = 0
         async with session_scope() as session:
             rows = (
-                await session.execute(
-                    select(Approval).where(Approval.status == "pending",
-                                           Approval.expires_at < now)
+                (
+                    await session.execute(
+                        select(Approval).where(Approval.status == "pending", Approval.expires_at < now)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for approval in rows:
                 approval.status = "expired"
-                approval.timeline = [*(approval.timeline or []),
-                                     {"at": now.isoformat(), "event": "expired"}]
+                approval.timeline = [*(approval.timeline or []), {"at": now.isoformat(), "event": "expired"}]
                 execution = (
-                    await session.execute(
-                        select(Execution).where(Execution.id == approval.execution_id)
-                    )
+                    await session.execute(select(Execution).where(Execution.id == approval.execution_id))
                 ).scalar_one_or_none()
                 if execution and execution.status == "awaiting_approval":
                     execution.status = "cancelled"
@@ -171,10 +172,10 @@ def run_scheduled_agents() -> dict[str, Any]:
         launched = []
         async with session_scope() as session:
             jobs = (
-                await session.execute(
-                    select(ScheduledJob).where(ScheduledJob.enabled.is_(True))
-                )
-            ).scalars().all()
+                (await session.execute(select(ScheduledJob).where(ScheduledJob.enabled.is_(True))))
+                .scalars()
+                .all()
+            )
             for job in jobs:
                 if job.next_run_at and job.next_run_at > now:
                     continue
@@ -215,9 +216,13 @@ def _next_cron_run(expression: str, after):
 
     candidate = (after + timedelta(minutes=1)).replace(second=0, microsecond=0)
     for _ in range(60 * 24 * 8):
-        if (matches(candidate.minute, fields[0]) and matches(candidate.hour, fields[1])
-                and matches(candidate.day, fields[2]) and matches(candidate.month, fields[3])
-                and matches((candidate.weekday() + 1) % 7, fields[4])):
+        if (
+            matches(candidate.minute, fields[0])
+            and matches(candidate.hour, fields[1])
+            and matches(candidate.day, fields[2])
+            and matches(candidate.month, fields[3])
+            and matches((candidate.weekday() + 1) % 7, fields[4])
+        ):
             return candidate
         candidate += timedelta(minutes=1)
     return after + timedelta(days=1)

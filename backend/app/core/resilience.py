@@ -100,8 +100,11 @@ class CircuitBreaker:
                     self.total_rejections += 1
                     raise CircuitOpenError(
                         f"Circuit '{self.name}' is open",
-                        details={"retry_after_seconds": round(
-                            self.recovery_seconds - (time.monotonic() - self._opened_at), 2)},
+                        details={
+                            "retry_after_seconds": round(
+                                self.recovery_seconds - (time.monotonic() - self._opened_at), 2
+                            )
+                        },
                     )
             if self._state == "half_open":
                 if self._half_open_calls >= self.half_open_max_calls:

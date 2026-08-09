@@ -13,13 +13,14 @@ and to the cost ledger through the caller-supplied sink.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from app.core.config import settings
 from app.core.errors import ProviderError, ProviderNotConfiguredError
 from app.core.logging import get_logger
 from app.core.metrics import llm_cost_usd_total, llm_errors_total, llm_latency, llm_tokens_total
+from app.core.resilience import CircuitBreaker as Breaker
 from app.core.resilience import RetryPolicy, get_breaker, with_retry
 from app.llm.base import LLMProvider
 from app.llm.catalog import CATALOG, ModelSpec, compute_cost, resolve_model
@@ -83,10 +84,7 @@ class ModelRouter:
         """
         from app.core.resilience import get_breaker
 
-        return [
-            name for name in self.configured_providers()
-            if get_breaker(f"llm:{name}").state != "open"
-        ]
+        return [name for name in self.configured_providers() if get_breaker(f"llm:{name}").state != "open"]
 
     def available_models(self, *, embeddings: bool | None = None) -> list[ModelSpec]:
         configured = set(self.configured_providers())
@@ -99,8 +97,11 @@ class ModelRouter:
 
     def is_available(self, model_id: str) -> bool:
         spec = resolve_model(model_id)
-        return bool(spec and (self._providers.get(spec.provider) or None) and
-                    self._providers[spec.provider].configured)
+        return bool(
+            spec
+            and (self._providers.get(spec.provider) or None)
+            and self._providers[spec.provider].configured
+        )
 
     # --- selection ----------------------------------------------------------
     def select(
@@ -116,8 +117,9 @@ class ModelRouter:
         if model:
             spec = resolve_model(model)
             if spec is None:
-                raise ProviderError(f"Unknown model '{model}'",
-                                    details={"known_models": sorted(CATALOG)[:40]})
+                raise ProviderError(
+                    f"Unknown model '{model}'", details={"known_models": sorted(CATALOG)[:40]}
+                )
             provider = self._providers.get(spec.provider)
             if provider and provider.configured:
                 return spec
@@ -139,12 +141,12 @@ class ModelRouter:
                 "No LLM provider is configured",
                 details={
                     "hint": "Set at least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, "
-                            "AZURE_OPENAI_API_KEY, AWS_ACCESS_KEY_ID, MISTRAL_API_KEY, "
-                            "DEEPSEEK_API_KEY, TOGETHER_API_KEY or OLLAMA_BASE_URL",
+                    "AZURE_OPENAI_API_KEY, AWS_ACCESS_KEY_ID, MISTRAL_API_KEY, "
+                    "DEEPSEEK_API_KEY, TOGETHER_API_KEY or OLLAMA_BASE_URL",
                     "requested_model": model,
                 },
             )
-        candidates.sort(key=lambda m: (m.input_price_per_mtok + m.output_price_per_mtok))
+        candidates.sort(key=lambda m: m.input_price_per_mtok + m.output_price_per_mtok)
         preferred = resolve_model(settings.default_model)
         if preferred and preferred in candidates and not (tier or max_cost_per_mtok):
             return preferred
@@ -164,15 +166,15 @@ class ModelRouter:
     # --- metering -----------------------------------------------------------
     async def _meter(self, response: LLMResponse, spec: ModelSpec, context: dict[str, Any]) -> None:
         response.cost_usd = compute_cost(
-            spec, response.usage.input_tokens, response.usage.output_tokens,
+            spec,
+            response.usage.input_tokens,
+            response.usage.output_tokens,
             response.usage.cached_input_tokens,
         )
         llm_tokens_total.labels(spec.provider, spec.id, "input").inc(response.usage.input_tokens)
         llm_tokens_total.labels(spec.provider, spec.id, "output").inc(response.usage.output_tokens)
         if response.usage.cached_input_tokens:
-            llm_tokens_total.labels(spec.provider, spec.id, "cached").inc(
-                response.usage.cached_input_tokens
-            )
+            llm_tokens_total.labels(spec.provider, spec.id, "cached").inc(response.usage.cached_input_tokens)
         llm_cost_usd_total.labels(spec.provider, spec.id).inc(response.cost_usd)
         llm_latency.labels(spec.provider, spec.id).observe(response.latency_ms / 1000)
         record = {
@@ -216,21 +218,37 @@ class ModelRouter:
 
         for candidate in chain:
             provider = self._providers[candidate.provider]
-            breaker = get_breaker(f"llm:{candidate.provider}", failure_threshold=5,
-                                  recovery_seconds=30)
+            breaker = get_breaker(f"llm:{candidate.provider}", failure_threshold=5, recovery_seconds=30)
 
-            async def _call(p: LLMProvider = provider, c: ModelSpec = candidate) -> LLMResponse:
-                return await p.chat(
-                    model=c.id, messages=messages, tools=tools, temperature=temperature,
-                    max_tokens=min(max_tokens, c.max_output_tokens or max_tokens),
-                    top_p=top_p, stop=stop, json_mode=json_mode and c.supports_json_mode,
-                )
+            # Bound through a factory rather than captured: the retry closure must see this
+            # iteration's provider, not whichever one the loop has moved on to.
+            def _attempt(
+                p: LLMProvider = provider,
+                c: ModelSpec = candidate,
+                b: Breaker = breaker,
+            ) -> Awaitable[LLMResponse]:
+                async def _call() -> LLMResponse:
+                    return await p.chat(
+                        model=c.id,
+                        messages=messages,
+                        tools=tools,
+                        temperature=temperature,
+                        max_tokens=min(max_tokens, c.max_output_tokens or max_tokens),
+                        top_p=top_p,
+                        stop=stop,
+                        json_mode=json_mode and c.supports_json_mode,
+                    )
+
+                return b.call(_call)
 
             try:
                 response = await with_retry(
-                    lambda p=provider, c=candidate, b=breaker: b.call(lambda: _call(p, c)),
-                    RetryPolicy(max_attempts=settings.llm_max_retries, base_delay=0.6,
-                                give_up_on=(ProviderNotConfiguredError,)),
+                    _attempt,
+                    RetryPolicy(
+                        max_attempts=settings.llm_max_retries,
+                        base_delay=0.6,
+                        give_up_on=(ProviderNotConfiguredError,),
+                    ),
                     name=f"llm:{candidate.id}",
                 )
                 await self._meter(response, candidate, context or {})
@@ -240,8 +258,7 @@ class ModelRouter:
             except Exception as exc:
                 last_error = exc
                 llm_errors_total.labels(candidate.provider, candidate.id, type(exc).__name__).inc()
-                log.error("llm_call_failed", model=candidate.id, provider=candidate.provider,
-                          error=str(exc))
+                log.error("llm_call_failed", model=candidate.id, provider=candidate.provider, error=str(exc))
         assert last_error is not None
         raise last_error
 
@@ -259,7 +276,10 @@ class ModelRouter:
         spec = self.select(model=model, tier=tier, needs_tools=bool(tools))
         provider = self._providers[spec.provider]
         async for chunk in provider.stream(
-            model=spec.id, messages=messages, tools=tools, temperature=temperature,
+            model=spec.id,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
             max_tokens=min(max_tokens, spec.max_output_tokens or max_tokens),
         ):
             if chunk.done and chunk.response is not None:
@@ -282,12 +302,18 @@ class ModelRouter:
         llm_cost_usd_total.labels(spec.provider, spec.id).inc(result.cost_usd)
         for sink in self._cost_sinks:
             try:
-                out = sink({
-                    "category": "embedding", "provider": spec.provider, "model": spec.id,
-                    "tokens_input": result.usage.input_tokens, "tokens_output": 0,
-                    "cost_usd": result.cost_usd, "latency_ms": result.latency_ms,
-                    **(context or {}),
-                })
+                out = sink(
+                    {
+                        "category": "embedding",
+                        "provider": spec.provider,
+                        "model": spec.id,
+                        "tokens_input": result.usage.input_tokens,
+                        "tokens_output": 0,
+                        "cost_usd": result.cost_usd,
+                        "latency_ms": result.latency_ms,
+                        **(context or {}),
+                    }
+                )
                 if asyncio.iscoroutine(out):
                     await out
             except Exception:

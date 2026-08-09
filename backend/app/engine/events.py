@@ -119,6 +119,8 @@ class EventEmitter:
                 )
             )
         await bus.publish(execution_channel(self.state.execution_id), event)
-        await bus.publish("executions:stream", {k: v for k, v in event.items() if k != "payload"}
-                          | {"payload_keys": list(payload)})
+        await bus.publish(
+            "executions:stream",
+            {k: v for k, v in event.items() if k != "payload"} | {"payload_keys": list(payload)},
+        )
         return event

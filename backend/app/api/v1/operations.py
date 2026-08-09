@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sse_starlette.sse import EventSourceResponse
 
 from app.api.deps import PrincipalDep, SessionDep, write_audit
@@ -48,16 +48,18 @@ def _serialise_approval(a: Approval) -> dict[str, Any]:
         "created_at": a.created_at.isoformat(),
         "decided_at": a.decided_at.isoformat() if a.decided_at else None,
         "expires_at": a.expires_at.isoformat() if a.expires_at else None,
-        "expired": bool(a.expires_at and a.expires_at < datetime.now(UTC)
-                        and a.status == "pending"),
+        "expired": bool(a.expires_at and a.expires_at < datetime.now(UTC) and a.status == "pending"),
     }
 
 
 @approvals_router.get("")
-async def list_approvals(session: SessionDep, principal: PrincipalDep,
-                         status_filter: str = Query(default="pending", alias="status"),
-                         agent_key: str | None = None,
-                         limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
+async def list_approvals(
+    session: SessionDep,
+    principal: PrincipalDep,
+    status_filter: str = Query(default="pending", alias="status"),
+    agent_key: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+) -> dict[str, Any]:
     principal.require(Permission.APPROVAL_READ)
     stmt = select(Approval).order_by(Approval.created_at.desc()).limit(limit)
     if status_filter and status_filter != "all":
@@ -65,17 +67,17 @@ async def list_approvals(session: SessionDep, principal: PrincipalDep,
     if agent_key:
         stmt = stmt.where(Approval.agent_key == agent_key)
     rows = (await session.execute(stmt)).scalars().all()
-    counts = dict(
-        (await session.execute(
-            select(Approval.status, func.count(Approval.id)).group_by(Approval.status)
-        )).all()
-    )
+    counts: dict[str, int] = {
+        status: count
+        for status, count in (
+            await session.execute(select(Approval.status, func.count(Approval.id)).group_by(Approval.status))
+        ).all()
+    }
     return {"counts": counts, "items": [_serialise_approval(a) for a in rows]}
 
 
 @approvals_router.get("/{approval_id}")
-async def get_approval(approval_id: str, session: SessionDep,
-                       principal: PrincipalDep) -> dict[str, Any]:
+async def get_approval(approval_id: str, session: SessionDep, principal: PrincipalDep) -> dict[str, Any]:
     principal.require(Permission.APPROVAL_READ)
     approval = (
         await session.execute(select(Approval).where(Approval.id == approval_id))
@@ -86,11 +88,19 @@ async def get_approval(approval_id: str, session: SessionDep,
         await session.execute(select(Execution).where(Execution.id == approval.execution_id))
     ).scalar_one_or_none()
     payload = _serialise_approval(approval)
-    payload["execution"] = {
-        "id": execution.id, "status": execution.status, "agent_key": execution.agent_key,
-        "input": execution.input, "trace_id": execution.trace_id,
-        "cost_usd": execution.cost_usd, "user_email": execution.user_email,
-    } if execution else None
+    payload["execution"] = (
+        {
+            "id": execution.id,
+            "status": execution.status,
+            "agent_key": execution.agent_key,
+            "input": execution.input,
+            "trace_id": execution.trace_id,
+            "cost_usd": execution.cost_usd,
+            "user_email": execution.user_email,
+        }
+        if execution
+        else None
+    )
     return payload
 
 
@@ -100,8 +110,9 @@ class DecisionRequest(BaseModel):
 
 
 @approvals_router.post("/{approval_id}/decision")
-async def decide_approval(approval_id: str, payload: DecisionRequest, request: Request,
-                          session: SessionDep, principal: PrincipalDep) -> dict[str, Any]:
+async def decide_approval(
+    approval_id: str, payload: DecisionRequest, request: Request, session: SessionDep, principal: PrincipalDep
+) -> dict[str, Any]:
     principal.require(Permission.APPROVAL_DECIDE)
     approval = (
         await session.execute(select(Approval).where(Approval.id == approval_id))
@@ -115,8 +126,7 @@ async def decide_approval(approval_id: str, payload: DecisionRequest, request: R
         raise ValidationError("Approval request has expired")
     if approval.required_role not in principal.roles and "admin" not in principal.roles:
         raise ForbiddenError(f"Decision requires role '{approval.required_role}'")
-    if approval.requested_by and approval.requested_by == principal.email \
-            and "admin" not in principal.roles:
+    if approval.requested_by and approval.requested_by == principal.email and "admin" not in principal.roles:
         raise ForbiddenError("Segregation of duties: you cannot approve your own request")
     if payload.decision not in {"approve", "reject"}:
         raise ValidationError("decision must be 'approve' or 'reject'")
@@ -128,25 +138,47 @@ async def decide_approval(approval_id: str, payload: DecisionRequest, request: R
     approval.reviewer_email = principal.email
     approval.comments = payload.comments
     approval.decided_at = now
-    approval.timeline = [*(approval.timeline or []),
-                         {"at": now.isoformat(), "event": approval.status,
-                          "by": principal.email, "comments": payload.comments}]
+    approval.timeline = [
+        *(approval.timeline or []),
+        {
+            "at": now.isoformat(),
+            "event": approval.status,
+            "by": principal.email,
+            "comments": payload.comments,
+        },
+    ]
     approvals_total.labels(approval.agent_key, approval.status).inc()
-    await write_audit(session, principal=principal, action=f"approval.{approval.status}",
-                      resource_type="approval", resource_id=approval_id, severity="warning",
-                      details={"execution_id": approval.execution_id,
-                               "risk": approval.risk_level}, request=request)
+    await write_audit(
+        session,
+        principal=principal,
+        action=f"approval.{approval.status}",
+        resource_type="approval",
+        resource_id=approval_id,
+        severity="warning",
+        details={"execution_id": approval.execution_id, "risk": approval.risk_level},
+        request=request,
+    )
     await session.commit()
 
-    await bus.publish(APPROVAL_CHANNEL, {"type": "approval.decided", "approval_id": approval.id,
-                                         "status": approval.status,
-                                         "execution_id": approval.execution_id,
-                                         "reviewer": principal.email})
+    await bus.publish(
+        APPROVAL_CHANNEL,
+        {
+            "type": "approval.decided",
+            "approval_id": approval.id,
+            "status": approval.status,
+            "execution_id": approval.execution_id,
+            "reviewer": principal.email,
+        },
+    )
     execution = await engine.resume_after_approval(
         session, approval.execution_id, approved=approved, approval_payload=approval.payload or {}
     )
-    return {"approval_id": approval.id, "status": approval.status,
-            "execution_id": approval.execution_id, "execution_status": execution.status}
+    return {
+        "approval_id": approval.id,
+        "status": approval.status,
+        "execution_id": approval.execution_id,
+        "execution_status": execution.status,
+    }
 
 
 @approvals_router.get("/stream/live")
@@ -187,7 +219,7 @@ async def search_logs(
     since = datetime.now(UTC) - timedelta(minutes=since_minutes)
     stmt = select(LogRecord).where(LogRecord.timestamp >= since)
     count_stmt = select(func.count(LogRecord.id)).where(LogRecord.timestamp >= since)
-    filters = []
+    filters: list[ColumnElement[bool]] = []
     if level:
         filters.append(LogRecord.level.in_([lv.strip().upper() for lv in level.split(",")]))
     if agent_key:
@@ -205,28 +237,42 @@ async def search_logs(
         count_stmt = count_stmt.where(f)
     total = int((await session.execute(count_stmt)).scalar_one())
     rows = (
-        await session.execute(
-            stmt.order_by(LogRecord.timestamp.desc()).limit(limit).offset(offset)
-        )
-    ).scalars().all()
+        (await session.execute(stmt.order_by(LogRecord.timestamp.desc()).limit(limit).offset(offset)))
+        .scalars()
+        .all()
+    )
     return {
-        "total": total, "limit": limit, "offset": offset,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
         "items": [
-            {"id": r.id, "timestamp": r.timestamp.isoformat(), "level": r.level,
-             "logger": r.logger, "message": r.message, "agent_key": r.agent_key,
-             "execution_id": r.execution_id, "correlation_id": r.correlation_id,
-             "trace_id": r.trace_id, "span_id": r.span_id, "user_email": r.user_email,
-             "attributes": r.attributes}
+            {
+                "id": r.id,
+                "timestamp": r.timestamp.isoformat(),
+                "level": r.level,
+                "logger": r.logger,
+                "message": r.message,
+                "agent_key": r.agent_key,
+                "execution_id": r.execution_id,
+                "correlation_id": r.correlation_id,
+                "trace_id": r.trace_id,
+                "span_id": r.span_id,
+                "user_email": r.user_email,
+                "attributes": r.attributes,
+            }
             for r in rows
         ],
     }
 
 
 @logs_router.get("/export")
-async def export_logs(session: SessionDep, principal: PrincipalDep,
-                      execution_id: str | None = None,
-                      since_minutes: int = Query(default=1440, ge=1, le=43200),
-                      fmt: str = Query(default="jsonl", pattern="^(jsonl|csv)$")):
+async def export_logs(
+    session: SessionDep,
+    principal: PrincipalDep,
+    execution_id: str | None = None,
+    since_minutes: int = Query(default=1440, ge=1, le=43200),
+    fmt: str = Query(default="jsonl", pattern="^(jsonl|csv)$"),
+):
     principal.require(Permission.LOG_READ)
     from fastapi.responses import StreamingResponse
 
@@ -241,26 +287,40 @@ async def export_logs(session: SessionDep, principal: PrincipalDep,
             yield "timestamp,level,logger,agent_key,execution_id,correlation_id,message\n"
             for r in rows:
                 message = (r.message or "").replace('"', '""')
-                yield (f'{r.timestamp.isoformat()},{r.level},{r.logger},{r.agent_key or ""},'
-                       f'{r.execution_id or ""},{r.correlation_id or ""},"{message}"\n')
+                yield (
+                    f"{r.timestamp.isoformat()},{r.level},{r.logger},{r.agent_key or ''},"
+                    f'{r.execution_id or ""},{r.correlation_id or ""},"{message}"\n'
+                )
         else:
             for r in rows:
-                yield json.dumps({
-                    "timestamp": r.timestamp.isoformat(), "level": r.level, "logger": r.logger,
-                    "message": r.message, "agent_key": r.agent_key,
-                    "execution_id": r.execution_id, "correlation_id": r.correlation_id,
-                    "trace_id": r.trace_id, "attributes": r.attributes,
-                }) + "\n"
+                yield (
+                    json.dumps(
+                        {
+                            "timestamp": r.timestamp.isoformat(),
+                            "level": r.level,
+                            "logger": r.logger,
+                            "message": r.message,
+                            "agent_key": r.agent_key,
+                            "execution_id": r.execution_id,
+                            "correlation_id": r.correlation_id,
+                            "trace_id": r.trace_id,
+                            "attributes": r.attributes,
+                        }
+                    )
+                    + "\n"
+                )
 
     media = "text/csv" if fmt == "csv" else "application/x-ndjson"
     filename = f"finops-logs-{datetime.now(UTC):%Y%m%dT%H%M%S}.{fmt}"
-    return StreamingResponse(render(), media_type=media,
-                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    return StreamingResponse(
+        render(), media_type=media, headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 @logs_router.get("/stream")
-async def stream_logs(request: Request, principal: PrincipalDep,
-                      level: str | None = None, agent_key: str | None = None):
+async def stream_logs(
+    request: Request, principal: PrincipalDep, level: str | None = None, agent_key: str | None = None
+):
     """Live log tail: subscribes to all execution channels and filters."""
     principal.require(Permission.LOG_READ)
     levels = {lv.strip().upper() for lv in level.split(",")} if level else None
@@ -281,16 +341,21 @@ async def stream_logs(request: Request, principal: PrincipalDep,
                 event_level = "ERROR" if "failed" in str(event.get("type", "")) else "INFO"
                 if levels and event_level not in levels:
                     continue
-                yield {"event": "log", "data": json.dumps({
-                    "timestamp": event.get("timestamp"),
-                    "level": event_level,
-                    "logger": f"agent.{event.get('agent_key', 'platform')}",
-                    "message": f"{event.get('type')} {payload.get('node') or ''}".strip(),
-                    "execution_id": event.get("execution_id"),
-                    "correlation_id": event.get("correlation_id"),
-                    "trace_id": event.get("trace_id"),
-                    "attributes": payload,
-                })}
+                yield {
+                    "event": "log",
+                    "data": json.dumps(
+                        {
+                            "timestamp": event.get("timestamp"),
+                            "level": event_level,
+                            "logger": f"agent.{event.get('agent_key', 'platform')}",
+                            "message": f"{event.get('type')} {payload.get('node') or ''}".strip(),
+                            "execution_id": event.get("execution_id"),
+                            "correlation_id": event.get("correlation_id"),
+                            "trace_id": event.get("trace_id"),
+                            "attributes": payload,
+                        }
+                    ),
+                }
 
     return EventSourceResponse(generator(), ping=15)
 
@@ -305,12 +370,15 @@ async def security_overview(session: SessionDep, principal: PrincipalDep) -> dic
     secrets_rows = (await session.execute(select(StoredSecret))).scalars().all()
     flags = (await session.execute(select(FeatureFlag))).scalars().all()
     failed_logins = int(
-        (await session.execute(
-            select(func.count(AuditLog.id)).where(
-                AuditLog.action == "auth.login", AuditLog.outcome == "failure",
-                AuditLog.created_at >= now - timedelta(days=1),
+        (
+            await session.execute(
+                select(func.count(AuditLog.id)).where(
+                    AuditLog.action == "auth.login",
+                    AuditLog.outcome == "failure",
+                    AuditLog.created_at >= now - timedelta(days=1),
+                )
             )
-        )).scalar_one()
+        ).scalar_one()
     )
     role_distribution: dict[str, int] = {}
     for user in users:
@@ -323,10 +391,10 @@ async def security_overview(session: SessionDep, principal: PrincipalDep) -> dic
             "active_users": sum(1 for u in users if u.is_active),
             "service_accounts": sum(1 for u in users if u.is_service_account),
             "mfa_enabled": sum(1 for u in users if u.mfa_enabled),
-            "mfa_coverage_pct": round(
-                sum(1 for u in users if u.mfa_enabled) / len(users) * 100, 2) if users else 0.0,
-            "locked_accounts": sum(1 for u in users
-                                   if u.locked_until and u.locked_until > now),
+            "mfa_coverage_pct": round(sum(1 for u in users if u.mfa_enabled) / len(users) * 100, 2)
+            if users
+            else 0.0,
+            "locked_accounts": sum(1 for u in users if u.locked_until and u.locked_until > now),
             "failed_logins_24h": failed_logins,
             "sso_configured": bool(settings.keycloak_url and settings.keycloak_realm),
             "sso_users": sum(1 for u in users if u.sso_provider),
@@ -338,24 +406,30 @@ async def security_overview(session: SessionDep, principal: PrincipalDep) -> dic
         },
         "api_keys": {
             "total": len(keys),
-            "active": sum(1 for k in keys if not k.revoked_at
-                          and (not k.expires_at or k.expires_at > now)),
+            "active": sum(1 for k in keys if not k.revoked_at and (not k.expires_at or k.expires_at > now)),
             "revoked": sum(1 for k in keys if k.revoked_at),
-            "expiring_30d": sum(1 for k in keys if k.expires_at
-                                and now < k.expires_at < now + timedelta(days=30)),
+            "expiring_30d": sum(
+                1 for k in keys if k.expires_at and now < k.expires_at < now + timedelta(days=30)
+            ),
         },
         "secrets": {
             "backend": secret_manager.backend,
             "vault_connected": secret_manager.healthy,
             "stored": len(secrets_rows),
             "rotation_due": sum(
-                1 for s in secrets_rows
+                1
+                for s in secrets_rows
                 if s.rotated_at and (now - s.rotated_at).days > s.rotation_interval_days
             ),
         },
         "feature_flags": [
-            {"key": f.key, "enabled": f.enabled, "rollout_percentage": f.rollout_percentage,
-             "description": f.description, "updated_by": f.updated_by}
+            {
+                "key": f.key,
+                "enabled": f.enabled,
+                "rollout_percentage": f.rollout_percentage,
+                "description": f.description,
+                "updated_by": f.updated_by,
+            }
             for f in flags
         ],
         "posture": {
@@ -375,35 +449,52 @@ async def security_overview(session: SessionDep, principal: PrincipalDep) -> dic
 
 
 @security_router.get("/audit")
-async def audit_trail(session: SessionDep, principal: PrincipalDep,
-                      action: str | None = None, actor: str | None = None,
-                      resource_type: str | None = None,
-                      since_hours: int = Query(default=168, ge=1, le=8760),
-                      limit: int = Query(default=200, ge=1, le=2000),
-                      offset: int = Query(default=0, ge=0)) -> dict[str, Any]:
+async def audit_trail(
+    session: SessionDep,
+    principal: PrincipalDep,
+    action: str | None = None,
+    actor: str | None = None,
+    resource_type: str | None = None,
+    since_hours: int = Query(default=168, ge=1, le=8760),
+    limit: int = Query(default=200, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
     principal.require(Permission.AUDIT_READ)
     since = datetime.now(UTC) - timedelta(hours=since_hours)
     stmt = select(AuditLog).where(AuditLog.created_at >= since)
     count_stmt = select(func.count(AuditLog.id)).where(AuditLog.created_at >= since)
-    for column, value in [(AuditLog.action, action), (AuditLog.actor_email, actor),
-                          (AuditLog.resource_type, resource_type)]:
+    for column, value in [
+        (AuditLog.action, action),
+        (AuditLog.actor_email, actor),
+        (AuditLog.resource_type, resource_type),
+    ]:
         if value:
             stmt = stmt.where(column == value)
             count_stmt = count_stmt.where(column == value)
     total = int((await session.execute(count_stmt)).scalar_one())
     rows = (
-        await session.execute(
-            stmt.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)
-        )
-    ).scalars().all()
+        (await session.execute(stmt.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset)))
+        .scalars()
+        .all()
+    )
     return {
         "total": total,
         "items": [
-            {"id": r.id, "timestamp": r.created_at.isoformat(), "actor_email": r.actor_email,
-             "actor_type": r.actor_type, "action": r.action, "resource_type": r.resource_type,
-             "resource_id": r.resource_id, "outcome": r.outcome, "severity": r.severity,
-             "ip_address": r.ip_address, "request_id": r.request_id, "trace_id": r.trace_id,
-             "details": r.details}
+            {
+                "id": r.id,
+                "timestamp": r.created_at.isoformat(),
+                "actor_email": r.actor_email,
+                "actor_type": r.actor_type,
+                "action": r.action,
+                "resource_type": r.resource_type,
+                "resource_id": r.resource_id,
+                "outcome": r.outcome,
+                "severity": r.severity,
+                "ip_address": r.ip_address,
+                "request_id": r.request_id,
+                "trace_id": r.trace_id,
+                "details": r.details,
+            }
             for r in rows
         ],
     }
@@ -421,17 +512,25 @@ async def list_secrets(session: SessionDep, principal: PrincipalDep) -> list[dic
     principal.require(Permission.SECURITY_READ)
     rows = (await session.execute(select(StoredSecret).order_by(StoredSecret.name))).scalars().all()
     return [
-        {"id": s.id, "name": s.name, "category": s.category, "hint": s.hint,
-         "backend": s.backend, "rotation_interval_days": s.rotation_interval_days,
-         "rotated_at": s.rotated_at.isoformat() if s.rotated_at else None,
-         "created_by": s.created_by, "created_at": s.created_at.isoformat()}
+        {
+            "id": s.id,
+            "name": s.name,
+            "category": s.category,
+            "hint": s.hint,
+            "backend": s.backend,
+            "rotation_interval_days": s.rotation_interval_days,
+            "rotated_at": s.rotated_at.isoformat() if s.rotated_at else None,
+            "created_by": s.created_by,
+            "created_at": s.created_at.isoformat(),
+        }
         for s in rows
     ]
 
 
 @security_router.put("/secrets")
-async def upsert_secret(payload: SecretUpsert, request: Request, session: SessionDep,
-                        principal: PrincipalDep) -> dict[str, Any]:
+async def upsert_secret(
+    payload: SecretUpsert, request: Request, session: SessionDep, principal: PrincipalDep
+) -> dict[str, Any]:
     principal.require(Permission.SECURITY_ADMIN)
     backend = await secret_manager.put(payload.name, payload.value)
     existing = (
@@ -448,16 +547,26 @@ async def upsert_secret(payload: SecretUpsert, request: Request, session: Sessio
         record = existing
     else:
         record = StoredSecret(
-            name=payload.name, category=payload.category, sealed_value=sealed,
-            hint=mask_secret(payload.value), backend=backend,
+            name=payload.name,
+            category=payload.category,
+            sealed_value=sealed,
+            hint=mask_secret(payload.value),
+            backend=backend,
             rotation_interval_days=payload.rotation_interval_days,
-            rotated_at=datetime.now(UTC), created_by=principal.email,
+            rotated_at=datetime.now(UTC),
+            created_by=principal.email,
         )
         session.add(record)
     secret_manager.invalidate(payload.name)
-    await write_audit(session, principal=principal, action="secret.upserted",
-                      resource_type="secret", resource_id=payload.name, severity="warning",
-                      request=request)
+    await write_audit(
+        session,
+        principal=principal,
+        action="secret.upserted",
+        resource_type="secret",
+        resource_id=payload.name,
+        severity="warning",
+        request=request,
+    )
     return {"name": payload.name, "backend": backend, "hint": mask_secret(payload.value)}
 
 
@@ -468,12 +577,11 @@ class FlagUpdate(BaseModel):
 
 
 @security_router.put("/feature-flags/{key}")
-async def upsert_flag(key: str, payload: FlagUpdate, request: Request, session: SessionDep,
-                      principal: PrincipalDep) -> dict[str, Any]:
+async def upsert_flag(
+    key: str, payload: FlagUpdate, request: Request, session: SessionDep, principal: PrincipalDep
+) -> dict[str, Any]:
     principal.require(Permission.FEATURE_FLAG_ADMIN)
-    flag = (
-        await session.execute(select(FeatureFlag).where(FeatureFlag.key == key))
-    ).scalar_one_or_none()
+    flag = (await session.execute(select(FeatureFlag).where(FeatureFlag.key == key))).scalar_one_or_none()
     if flag is None:
         flag = FeatureFlag(key=key, description=payload.description or "")
         session.add(flag)
@@ -482,7 +590,13 @@ async def upsert_flag(key: str, payload: FlagUpdate, request: Request, session: 
     if payload.description is not None:
         flag.description = payload.description
     flag.updated_by = principal.email
-    await write_audit(session, principal=principal, action="flag.updated",
-                      resource_type="feature_flag", resource_id=key,
-                      details=payload.model_dump(), request=request)
+    await write_audit(
+        session,
+        principal=principal,
+        action="flag.updated",
+        resource_type="feature_flag",
+        resource_id=key,
+        details=payload.model_dump(),
+        request=request,
+    )
     return {"key": key, "enabled": flag.enabled, "rollout_percentage": flag.rollout_percentage}

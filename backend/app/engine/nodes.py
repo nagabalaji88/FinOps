@@ -44,8 +44,6 @@ from app.tools.base import ToolContext, registry
 log = get_logger("engine.nodes")
 
 
-
-
 class ApprovalPause(Exception):
     """Raised to suspend an execution until a human decides."""
 
@@ -62,9 +60,7 @@ class RunContext:
     agent: Any  # AgentSpec
     spans: list[Span] = field(default_factory=list)
 
-    async def open_span(
-        self, name: str, kind: str, *, inputs: dict[str, Any] | None = None
-    ) -> Span:
+    async def open_span(self, name: str, kind: str, *, inputs: dict[str, Any] | None = None) -> Span:
         span = Span(
             execution_id=self.state.execution_id,
             trace_id=self.state.trace_id,
@@ -134,13 +130,16 @@ class Node:
     async def __call__(self, ctx: RunContext) -> None:
         ctx.state.current_node = self.key
         if not await self.should_run(ctx):
-            await ctx.emitter.emit(EventType.NODE_SKIPPED, {"node": self.key, "label": self.label},
-                                   node=self.key)
+            await ctx.emitter.emit(
+                EventType.NODE_SKIPPED, {"node": self.key, "label": self.label}, node=self.key
+            )
             return
         ctx.state.node_path.append(self.key)
         await ctx.emitter.emit(
-            EventType.NODE_STARTED, {"node": self.key, "label": self.label, "kind": self.kind},
-            node=self.key, log_message=f"Node '{self.label}' started",
+            EventType.NODE_STARTED,
+            {"node": self.key, "label": self.label, "kind": self.kind},
+            node=self.key,
+            log_message=f"Node '{self.label}' started",
         )
         await self.run(ctx)
         await ctx.emitter.emit(
@@ -166,27 +165,37 @@ class InputRailsNode(Node):
     async def run(self, ctx: RunContext) -> None:
         state = ctx.state
         text = _user_text(state.input)
-        span = await ctx.open_span("guardrails.input_rails", "guardrail",
-                                   inputs={"chars": len(text)})
+        span = await ctx.open_span("guardrails.input_rails", "guardrail", inputs={"chars": len(text)})
         result = await nemo_guardrails.check_input(
-            ctx.agent.key, text,
+            ctx.agent.key,
+            text,
             context={"pii_allowlist": list(ctx.agent.pii_allowlist or [])},
         )
         findings = [finding.to_dict() for finding in result.findings]
         state.guardrail_findings.extend(findings)
         await ctx.close_span(
-            span, status="error" if result.blocked else "ok",
-            outputs={"evaluated": result.evaluated, "blocked": result.blocked,
-                     "findings": findings, "llm_rails": result.llm_rails},
+            span,
+            status="error" if result.blocked else "ok",
+            outputs={
+                "evaluated": result.evaluated,
+                "blocked": result.blocked,
+                "findings": findings,
+                "llm_rails": result.llm_rails,
+            },
         )
         await ctx.emitter.emit(
             EventType.GUARDRAIL,
-            {"rails": "input", "engine": "nemo", "findings": findings,
-             "blocked": result.blocked, "evaluated": result.evaluated,
-             "llm_rails": result.llm_rails, "reason": result.reason},
+            {
+                "rails": "input",
+                "engine": "nemo",
+                "findings": findings,
+                "blocked": result.blocked,
+                "evaluated": result.evaluated,
+                "llm_rails": result.llm_rails,
+                "reason": result.reason,
+            },
             node=self.key,
-            log_message=f"Input rails: {len(findings)} findings"
-                        f"{', blocked' if result.blocked else ''}",
+            log_message=f"Input rails: {len(findings)} findings{', blocked' if result.blocked else ''}",
         )
         if result.blocked and settings.nemo_block_on_input_rail:
             raise GuardrailViolation(
@@ -242,9 +251,12 @@ class PlannerNode(Node):
                 max_tokens=900,
                 json_mode=True,
                 context={
-                    "execution_id": state.execution_id, "agent_key": state.agent_key,
-                    "span_id": span.span_id, "user_id": state.user_id,
-                    "user_email": state.user_email, "department": state.department,
+                    "execution_id": state.execution_id,
+                    "agent_key": state.agent_key,
+                    "span_id": span.span_id,
+                    "user_id": state.user_id,
+                    "user_email": state.user_email,
+                    "department": state.department,
                 },
             )
         except Exception as exc:
@@ -252,25 +264,34 @@ class PlannerNode(Node):
             raise
         state.llm_calls += 1
         state.record_usage(
-            input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens,
-            cached=response.usage.cached_input_tokens, cost=response.cost_usd,
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+            cached=response.usage.cached_input_tokens,
+            cost=response.cost_usd,
         )
         plan = _parse_json(response.content) or {
             "objective": str(state.input.get("query") or state.input.get("objective") or "")[:400],
-            "steps": [], "required_tools": [], "needs_knowledge_search": bool(ctx.agent.knowledge_sources),
-            "risk_level": "medium", "raw": response.content[:2000],
+            "steps": [],
+            "required_tools": [],
+            "needs_knowledge_search": bool(ctx.agent.knowledge_sources),
+            "risk_level": "medium",
+            "raw": response.content[:2000],
         }
         state.plan = plan
         state.reasoning_log.append(f"Plan: {plan.get('objective', '')}")
         await ctx.close_span(
-            span, outputs=plan, attributes={"model": response.model, "provider": response.provider},
-            tokens_input=response.usage.input_tokens, tokens_output=response.usage.output_tokens,
+            span,
+            outputs=plan,
+            attributes={"model": response.model, "provider": response.provider},
+            tokens_input=response.usage.input_tokens,
+            tokens_output=response.usage.output_tokens,
             cost_usd=response.cost_usd,
         )
         await ctx.emitter.emit(
-            EventType.PLANNING, {"plan": plan, "model": response.model,
-                                 "latency_ms": round(response.latency_ms, 2)},
-            node=self.key, log_message=f"Plan created with {len(plan.get('steps', []))} steps",
+            EventType.PLANNING,
+            {"plan": plan, "model": response.model, "latency_ms": round(response.latency_ms, 2)},
+            node=self.key,
+            log_message=f"Plan created with {len(plan.get('steps', []))} steps",
         )
 
 
@@ -315,42 +336,65 @@ class RetrieverNode(Node):
         if not query:
             return
         span = await ctx.open_span(
-            "retriever.hybrid_search", "retriever",
+            "retriever.hybrid_search",
+            "retriever",
             inputs={"query": query[:500], "sources": ctx.agent.knowledge_sources},
         )
         sources = (
-            await ctx.session.execute(
-                select(KnowledgeSource).where(KnowledgeSource.key.in_(ctx.agent.knowledge_sources))
+            (
+                await ctx.session.execute(
+                    select(KnowledgeSource).where(KnowledgeSource.key.in_(ctx.agent.knowledge_sources))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         source_keys = [s.key for s in sources if s.enabled]
         result = await pipeline.search(
-            ctx.session, query, top_k=ctx.agent.retrieval_top_k, source_keys=source_keys or None,
-            agent_key=state.agent_key, execution_id=state.execution_id,
+            ctx.session,
+            query,
+            top_k=ctx.agent.retrieval_top_k,
+            source_keys=source_keys or None,
+            agent_key=state.agent_key,
+            execution_id=state.execution_id,
         )
         state.retrieved = [m.to_dict() for m in result.matches]
         state.citations = result.to_citations()
         state.scratch["retrieval_context"] = result.as_prompt_block()
         await ctx.close_span(
             span,
-            outputs={"matches": len(result.matches),
-                     "top_score": result.matches[0].score if result.matches else None},
-            attributes={"backend": result.backend, "embedding_model": result.embedding_model,
-                        "method": result.method, "latency_ms": round(result.latency_ms, 2)},
+            outputs={
+                "matches": len(result.matches),
+                "top_score": result.matches[0].score if result.matches else None,
+            },
+            attributes={
+                "backend": result.backend,
+                "embedding_model": result.embedding_model,
+                "method": result.method,
+                "latency_ms": round(result.latency_ms, 2),
+            },
         )
         await ctx.emitter.emit(
             EventType.KNOWLEDGE_SEARCH,
-            {"query": query[:500], "results": len(result.matches), "backend": result.backend,
-             "embedding_model": result.embedding_model, "latency_ms": round(result.latency_ms, 2),
-             "citations": state.citations},
+            {
+                "query": query[:500],
+                "results": len(result.matches),
+                "backend": result.backend,
+                "embedding_model": result.embedding_model,
+                "latency_ms": round(result.latency_ms, 2),
+                "citations": state.citations,
+            },
             node=self.key,
             log_message=f"Knowledge search returned {len(result.matches)} chunks in "
-                        f"{result.latency_ms:.0f}ms",
+            f"{result.latency_ms:.0f}ms",
         )
         await ctx.emitter.emit(
             EventType.VECTOR_SEARCH,
-            {"backend": result.backend, "top_k": ctx.agent.retrieval_top_k,
-             "scores": [round(m.score, 4) for m in result.matches]},
+            {
+                "backend": result.backend,
+                "top_k": ctx.agent.retrieval_top_k,
+                "scores": [round(m.score, 4) for m in result.matches],
+            },
             node=self.key,
         )
 
@@ -368,13 +412,12 @@ class MemoryNode(Node):
         state = ctx.state
         span = await ctx.open_span("memory.load", "memory", inputs={"thread": state.thread_id})
         thread = (
-            await ctx.session.execute(
-                select(MemoryThread).where(MemoryThread.thread_key == state.thread_id)
-            )
+            await ctx.session.execute(select(MemoryThread).where(MemoryThread.thread_key == state.thread_id))
         ).scalar_one_or_none()
         if thread is None:
             thread = MemoryThread(
-                thread_key=state.thread_id or "", agent_key=state.agent_key,
+                thread_key=state.thread_id or "",
+                agent_key=state.agent_key,
                 subject_id=str(state.input.get("customer_id") or "") or None,
                 title=str(state.input.get("query", ""))[:280],
                 last_activity_at=datetime.now(UTC),
@@ -382,27 +425,37 @@ class MemoryNode(Node):
             ctx.session.add(thread)
             await ctx.session.flush()
         messages = (
-            await ctx.session.execute(
-                select(MemoryMessage)
-                .where(MemoryMessage.thread_id == thread.id)
-                .order_by(MemoryMessage.created_at.desc())
-                .limit(ctx.agent.memory_window)
+            (
+                await ctx.session.execute(
+                    select(MemoryMessage)
+                    .where(MemoryMessage.thread_id == thread.id)
+                    .order_by(MemoryMessage.created_at.desc())
+                    .limit(ctx.agent.memory_window)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         history = list(reversed(messages))
         state.scratch["memory_thread_id"] = thread.id
         state.memory_summary = thread.summary or None
         for m in history:
             state.messages.append(Message(role=m.role, content=m.content))  # type: ignore[arg-type]
         await ctx.close_span(
-            span, outputs={"messages_loaded": len(history), "has_summary": bool(thread.summary)},
+            span,
+            outputs={"messages_loaded": len(history), "has_summary": bool(thread.summary)},
             attributes={"thread_id": thread.id, "facts": len(thread.facts or [])},
         )
         await ctx.emitter.emit(
             EventType.MEMORY_RETRIEVAL,
-            {"thread": state.thread_id, "messages": len(history),
-             "summary": (thread.summary or "")[:400], "facts": thread.facts or []},
-            node=self.key, log_message=f"Loaded {len(history)} memory messages",
+            {
+                "thread": state.thread_id,
+                "messages": len(history),
+                "summary": (thread.summary or "")[:400],
+                "facts": thread.facts or [],
+            },
+            node=self.key,
+            log_message=f"Loaded {len(history)} memory messages",
         )
 
 
@@ -434,21 +487,31 @@ class ReasoningNode(Node):
             if state.budget.exhausted:
                 raise BudgetExceededError(
                     "Execution budget exhausted",
-                    details={"spent_usd": round(state.budget.spent_usd, 4),
-                             "cap_usd": state.budget.max_cost_usd},
+                    details={
+                        "spent_usd": round(state.budget.spent_usd, 4),
+                        "cap_usd": state.budget.max_cost_usd,
+                    },
                 )
 
             state.current_node = self.key
             span = await ctx.open_span(
-                f"llm.completion#{state.iteration}", "llm",
-                inputs={"messages": len(state.messages), "tools": len(tool_schemas),
-                        "iteration": state.iteration},
+                f"llm.completion#{state.iteration}",
+                "llm",
+                inputs={
+                    "messages": len(state.messages),
+                    "tools": len(tool_schemas),
+                    "iteration": state.iteration,
+                },
             )
             await ctx.emitter.emit(
                 EventType.LLM_STARTED,
-                {"iteration": state.iteration, "messages": len(state.messages),
-                 "tools_offered": [t.name for t in tool_schemas]},
-                node=self.key, span_id=span.span_id,
+                {
+                    "iteration": state.iteration,
+                    "messages": len(state.messages),
+                    "tools_offered": [t.name for t in tool_schemas],
+                },
+                node=self.key,
+                span_id=span.span_id,
             )
             try:
                 response = await router.chat(
@@ -457,15 +520,22 @@ class ReasoningNode(Node):
                     tools=tool_schemas or None,
                     temperature=agent.temperature,
                     max_tokens=agent.max_tokens,
-                    context={"execution_id": state.execution_id, "agent_key": state.agent_key,
-                             "span_id": span.span_id, "user_id": state.user_id,
-                             "user_email": state.user_email, "department": state.department},
+                    context={
+                        "execution_id": state.execution_id,
+                        "agent_key": state.agent_key,
+                        "span_id": span.span_id,
+                        "user_id": state.user_id,
+                        "user_email": state.user_email,
+                        "department": state.department,
+                    },
                 )
             except Exception as exc:
                 await ctx.close_span(span, status="error", error=str(exc))
                 await ctx.emitter.emit(
-                    EventType.NODE_FAILED, {"node": self.key, "error": str(exc)},
-                    node=self.key, log_message=f"LLM call failed: {exc}",
+                    EventType.NODE_FAILED,
+                    {"node": self.key, "error": str(exc)},
+                    node=self.key,
+                    log_message=f"LLM call failed: {exc}",
                 )
                 raise
 
@@ -480,37 +550,47 @@ class ReasoningNode(Node):
             )
             await ctx.close_span(
                 span,
-                outputs={"content": response.content[:4000],
-                         "tool_calls": [tc.name for tc in response.tool_calls],
-                         "finish_reason": response.finish_reason},
-                attributes={"model": response.model, "provider": response.provider,
-                            "request_id": response.request_id,
-                            "latency_ms": round(response.latency_ms, 2)},
+                outputs={
+                    "content": response.content[:4000],
+                    "tool_calls": [tc.name for tc in response.tool_calls],
+                    "finish_reason": response.finish_reason,
+                },
+                attributes={
+                    "model": response.model,
+                    "provider": response.provider,
+                    "request_id": response.request_id,
+                    "latency_ms": round(response.latency_ms, 2),
+                },
                 tokens_input=response.usage.input_tokens,
                 tokens_output=response.usage.output_tokens,
                 cost_usd=response.cost_usd,
             )
             await ctx.emitter.emit(
                 EventType.LLM_COMPLETED,
-                {"model": response.model, "provider": response.provider,
-                 "latency_ms": round(response.latency_ms, 2),
-                 "tokens": {"input": response.usage.input_tokens,
-                            "output": response.usage.output_tokens,
-                            "cached": response.usage.cached_input_tokens},
-                 "cost_usd": round(response.cost_usd, 6),
-                 "content_preview": response.content[:600],
-                 "tool_calls": [{"name": tc.name, "arguments": tc.arguments}
-                                for tc in response.tool_calls]},
-                node=self.key, span_id=span.span_id,
+                {
+                    "model": response.model,
+                    "provider": response.provider,
+                    "latency_ms": round(response.latency_ms, 2),
+                    "tokens": {
+                        "input": response.usage.input_tokens,
+                        "output": response.usage.output_tokens,
+                        "cached": response.usage.cached_input_tokens,
+                    },
+                    "cost_usd": round(response.cost_usd, 6),
+                    "content_preview": response.content[:600],
+                    "tool_calls": [
+                        {"name": tc.name, "arguments": tc.arguments} for tc in response.tool_calls
+                    ],
+                },
+                node=self.key,
+                span_id=span.span_id,
                 log_message=f"LLM {response.model} responded in {response.latency_ms:.0f}ms "
-                            f"({response.usage.total} tokens, ${response.cost_usd:.4f})",
+                f"({response.usage.total} tokens, ${response.cost_usd:.4f})",
             )
             await ctx.session.commit()
             if response.content:
                 state.reasoning_log.append(response.content[:1500])
-                await ctx.emitter.emit(
-                    EventType.REASONING, {"text": response.content[:2000]}, node=self.key
-                )
+                await ctx.emitter.emit(EventType.REASONING, {"text": response.content[:2000]}, node=self.key)
 
             state.messages.append(
                 Message(role="assistant", content=response.content, tool_calls=response.tool_calls)
@@ -522,12 +602,13 @@ class ReasoningNode(Node):
 
             await self._execute_tools(ctx, response.tool_calls)
 
-        state.final_response = state.final_response or (
-            state.messages[-1].content if state.messages else ""
-        )
+        state.final_response = state.final_response or (state.messages[-1].content if state.messages else "")
         state.validation_findings.append(
-            {"check": "iteration_limit", "status": "warning",
-             "detail": f"Reached max iterations ({max_iterations})"}
+            {
+                "check": "iteration_limit",
+                "status": "warning",
+                "detail": f"Reached max iterations ({max_iterations})",
+            }
         )
 
     async def _execute_tools(self, ctx: RunContext, tool_calls: list[ToolCall]) -> None:
@@ -539,9 +620,12 @@ class ReasoningNode(Node):
                 continue
             if not registry.has(call.name):
                 state.messages.append(
-                    Message(role="tool", tool_call_id=call.id, name=call.name,
-                            content=json.dumps({"ok": False,
-                                                "error": f"Unknown tool '{call.name}'"}))
+                    Message(
+                        role="tool",
+                        tool_call_id=call.id,
+                        name=call.name,
+                        content=json.dumps({"ok": False, "error": f"Unknown tool '{call.name}'"}),
+                    )
                 )
                 continue
 
@@ -552,10 +636,13 @@ class ReasoningNode(Node):
                     ctx,
                     node="tools",
                     title=f"Approve tool call: {tool.name}",
-                    summary=f"{ctx.agent.name} requests to run '{tool.name}' "
-                            f"({tool.description[:200]})",
-                    payload={"tool": tool.name, "arguments": call.arguments,
-                             "tool_call_id": call.id, "writes_data": tool.writes_data},
+                    summary=f"{ctx.agent.name} requests to run '{tool.name}' ({tool.description[:200]})",
+                    payload={
+                        "tool": tool.name,
+                        "arguments": call.arguments,
+                        "tool_call_id": call.id,
+                        "writes_data": tool.writes_data,
+                    },
                     risk=tool.approval_risk,
                 )
                 state.pending_tool_calls = tool_calls
@@ -563,27 +650,36 @@ class ReasoningNode(Node):
 
             if state.approved_tool_calls.get(call.id) is False:
                 state.messages.append(
-                    Message(role="tool", tool_call_id=call.id, name=call.name,
-                            content=json.dumps({"ok": False,
-                                                "error": "Rejected by human reviewer"}))
+                    Message(
+                        role="tool",
+                        tool_call_id=call.id,
+                        name=call.name,
+                        content=json.dumps({"ok": False, "error": "Rejected by human reviewer"}),
+                    )
                 )
                 continue
 
-            span = await ctx.open_span(f"tool.{call.name}", "tool",
-                                       inputs={"arguments": call.arguments})
+            span = await ctx.open_span(f"tool.{call.name}", "tool", inputs={"arguments": call.arguments})
             await ctx.emitter.emit(
-                EventType.TOOL_STARTED, {"tool": call.name, "arguments": call.arguments},
-                node="tools", span_id=span.span_id,
+                EventType.TOOL_STARTED,
+                {"tool": call.name, "arguments": call.arguments},
+                node="tools",
+                span_id=span.span_id,
                 log_message=f"Invoking tool '{call.name}'",
             )
             result = await registry.invoke(
                 call.name,
                 call.arguments,
                 ToolContext(
-                    execution_id=state.execution_id, agent_key=state.agent_key,
-                    user_id=state.user_id, user_email=state.user_email, roles=state.roles,
-                    correlation_id=state.correlation_id, trace_id=state.trace_id,
-                    session=ctx.session, state=state.scratch,
+                    execution_id=state.execution_id,
+                    agent_key=state.agent_key,
+                    user_id=state.user_id,
+                    user_email=state.user_email,
+                    roles=state.roles,
+                    correlation_id=state.correlation_id,
+                    trace_id=state.trace_id,
+                    session=ctx.session,
+                    state=state.scratch,
                 ),
             )
             state.tool_calls += 1
@@ -591,37 +687,50 @@ class ReasoningNode(Node):
             if result.retries:
                 agent_retries_total.labels(state.agent_key, call.name).inc(result.retries)
                 await ctx.emitter.emit(
-                    EventType.RETRY, {"tool": call.name, "retries": result.retries}, node="tools",
+                    EventType.RETRY,
+                    {"tool": call.name, "retries": result.retries},
+                    node="tools",
                     log_message=f"Tool '{call.name}' retried {result.retries}x",
                 )
             state.tool_results.append(result.to_dict())
             await ctx.close_span(
-                span, status="ok" if result.ok else "error",
+                span,
+                status="ok" if result.ok else "error",
                 outputs={"data": result.data} if result.ok else {"error": result.error},
-                error=result.error, retry_count=result.retries,
+                error=result.error,
+                retry_count=result.retries,
                 attributes={"category": tool.category, "writes_data": tool.writes_data},
             )
             await ctx.emitter.emit(
                 EventType.TOOL_COMPLETED if result.ok else EventType.TOOL_FAILED,
-                {"tool": call.name, "ok": result.ok, "latency_ms": round(result.latency_ms, 2),
-                 "retries": result.retries,
-                 "result_preview": _truncate(result.data, 2000) if result.ok else result.error},
-                node="tools", span_id=span.span_id,
+                {
+                    "tool": call.name,
+                    "ok": result.ok,
+                    "latency_ms": round(result.latency_ms, 2),
+                    "retries": result.retries,
+                    "result_preview": _truncate(result.data, 2000) if result.ok else result.error,
+                },
+                node="tools",
+                span_id=span.span_id,
                 log_message=f"Tool '{call.name}' "
-                            f"{'succeeded' if result.ok else 'failed: ' + str(result.error)} "
-                            f"in {result.latency_ms:.0f}ms",
+                f"{'succeeded' if result.ok else 'failed: ' + str(result.error)} "
+                f"in {result.latency_ms:.0f}ms",
             )
             await ctx.session.commit()
             if tool.category in {"database", "banking"}:
-                await ctx.emitter.emit(EventType.DATABASE_QUERY,
-                                       {"tool": call.name, "ok": result.ok}, node="tools")
+                await ctx.emitter.emit(
+                    EventType.DATABASE_QUERY, {"tool": call.name, "ok": result.ok}, node="tools"
+                )
             elif tool.category in {"http", "external", "market"}:
-                await ctx.emitter.emit(EventType.API_CALL,
-                                       {"tool": call.name, "ok": result.ok}, node="tools")
+                await ctx.emitter.emit(EventType.API_CALL, {"tool": call.name, "ok": result.ok}, node="tools")
 
             state.messages.append(
-                Message(role="tool", tool_call_id=call.id, name=call.name,
-                        content=json.dumps(result.to_dict(), default=str)[:12000])
+                Message(
+                    role="tool",
+                    tool_call_id=call.id,
+                    name=call.name,
+                    content=json.dumps(result.to_dict(), default=str)[:12000],
+                )
             )
         state.current_node = self.key
 
@@ -647,8 +756,9 @@ async def create_approval(
         required_role=ctx.agent.approval_role,
         requested_by=state.user_email,
         expires_at=datetime.now(UTC) + timedelta(seconds=settings.approval_timeout_seconds),
-        timeline=[{"at": datetime.now(UTC).isoformat(), "event": "requested",
-                   "by": state.user_email or "system"}],
+        timeline=[
+            {"at": datetime.now(UTC).isoformat(), "event": "requested", "by": state.user_email or "system"}
+        ],
     )
     ctx.session.add(approval)
     await ctx.session.flush()
@@ -659,18 +769,37 @@ async def create_approval(
     await ctx.close_span(span, status="ok", outputs={"approval_id": approval.id, "risk": risk})
     await ctx.emitter.emit(
         EventType.APPROVAL_REQUESTED,
-        {"approval_id": approval.id, "title": approval.title, "summary": summary,
-         "risk": risk, "payload": payload, "required_role": ctx.agent.approval_role},
-        node=node, log_message=f"Human approval requested: {title}",
+        {
+            "approval_id": approval.id,
+            "title": approval.title,
+            "summary": summary,
+            "risk": risk,
+            "payload": payload,
+            "required_role": ctx.agent.approval_role,
+        },
+        node=node,
+        log_message=f"Human approval requested: {title}",
     )
-    await bus.publish(APPROVAL_CHANNEL, {
-        "type": "approval.requested", "approval_id": approval.id,
-        "execution_id": state.execution_id, "agent_key": state.agent_key,
-        "title": approval.title, "risk": risk,
-        "created_at": datetime.now(UTC).isoformat(),
-    })
-    return PendingApproval(approval_id=approval.id, tool_call=payload, node=node,
-                           title=approval.title, summary=summary, risk=risk)
+    await bus.publish(
+        APPROVAL_CHANNEL,
+        {
+            "type": "approval.requested",
+            "approval_id": approval.id,
+            "execution_id": state.execution_id,
+            "agent_key": state.agent_key,
+            "title": approval.title,
+            "risk": risk,
+            "created_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    return PendingApproval(
+        approval_id=approval.id,
+        tool_call=payload,
+        node=node,
+        title=approval.title,
+        summary=summary,
+        risk=risk,
+    )
 
 
 # --- 6. Validation -------------------------------------------------------------
@@ -685,54 +814,63 @@ class ValidationNode(Node):
         findings: list[dict[str, Any]] = []
         response = state.final_response or ""
 
-        findings.append({
-            "check": "non_empty_response",
-            "status": "pass" if response.strip() else "fail",
-            "detail": f"{len(response)} characters",
-        })
+        findings.append(
+            {
+                "check": "non_empty_response",
+                "status": "pass" if response.strip() else "fail",
+                "detail": f"{len(response)} characters",
+            }
+        )
         failed_tools = [t for t in state.tool_results if not t["ok"]]
-        findings.append({
-            "check": "tool_success",
-            "status": "pass" if not failed_tools else "warning",
-            "detail": f"{len(state.tool_results) - len(failed_tools)}/{len(state.tool_results)} "
-                      f"tool calls succeeded",
-        })
+        findings.append(
+            {
+                "check": "tool_success",
+                "status": "pass" if not failed_tools else "warning",
+                "detail": f"{len(state.tool_results) - len(failed_tools)}/{len(state.tool_results)} "
+                f"tool calls succeeded",
+            }
+        )
         if ctx.agent.require_citations:
             has_citation = bool(re.search(r"\[\d+\]", response)) and bool(state.citations)
-            findings.append({
-                "check": "citations_present",
-                "status": "pass" if has_citation else "fail",
-                "detail": f"{len(state.citations)} sources retrieved",
-            })
+            findings.append(
+                {
+                    "check": "citations_present",
+                    "status": "pass" if has_citation else "fail",
+                    "detail": f"{len(state.citations)} sources retrieved",
+                }
+            )
         if ctx.agent.output_schema:
             parsed = _parse_json(response)
             missing = [k for k in ctx.agent.output_schema if parsed is None or k not in parsed]
-            findings.append({
-                "check": "output_schema",
-                "status": "pass" if not missing else "warning",
-                "detail": f"missing keys: {missing}" if missing else "all required keys present",
-            })
+            findings.append(
+                {
+                    "check": "output_schema",
+                    "status": "pass" if not missing else "warning",
+                    "detail": f"missing keys: {missing}" if missing else "all required keys present",
+                }
+            )
             if parsed:
                 state.output.update(parsed)
         grounded = _groundedness(response, state.retrieved)
-        findings.append({
-            "check": "groundedness",
-            "status": "pass" if grounded >= 0.35 or not state.retrieved else "warning",
-            "detail": f"overlap score {grounded:.2f}",
-            "score": round(grounded, 4),
-        })
+        findings.append(
+            {
+                "check": "groundedness",
+                "status": "pass" if grounded >= 0.35 or not state.retrieved else "warning",
+                "detail": f"overlap score {grounded:.2f}",
+                "score": round(grounded, 4),
+            }
+        )
         state.validation_findings.extend(findings)
         failed = [f for f in findings if f["status"] == "fail"]
-        await ctx.close_span(span, status="ok" if not failed else "error",
-                             outputs={"findings": findings})
+        await ctx.close_span(span, status="ok" if not failed else "error", outputs={"findings": findings})
         await ctx.emitter.emit(
-            EventType.VALIDATION, {"findings": findings, "failed": len(failed)},
+            EventType.VALIDATION,
+            {"findings": findings, "failed": len(failed)},
             node=self.key,
             log_message=f"Validation: {len(findings) - len(failed)}/{len(findings)} checks passed",
         )
         if failed and ctx.agent.strict_validation:
-            raise GuardrailViolation("Response failed validation",
-                                     details={"findings": failed})
+            raise GuardrailViolation("Response failed validation", details={"findings": failed})
 
 
 def _groundedness(response: str, retrieved: list[dict[str, Any]]) -> float:
@@ -763,8 +901,14 @@ class GuardrailNode(Node):
         user_text = json.dumps(state.input, default=str)
         for pattern in PROMPT_INJECTION_PATTERNS:
             if pattern.search(user_text):
-                findings.append({"rule": "prompt_injection", "severity": "high",
-                                 "action": "flagged", "detail": pattern.pattern})
+                findings.append(
+                    {
+                        "rule": "prompt_injection",
+                        "severity": "high",
+                        "action": "flagged",
+                        "detail": pattern.pattern,
+                    }
+                )
 
         if ctx.agent.mask_pii:
             for label, pattern in PII_PATTERNS:
@@ -773,13 +917,20 @@ class GuardrailNode(Node):
                 matches = pattern.findall(response)
                 if matches:
                     response = pattern.sub(lambda m: _mask(m.group(0)), response)
-                    findings.append({"rule": f"pii_{label}", "severity": "medium",
-                                     "action": "masked", "count": len(matches)})
+                    findings.append(
+                        {
+                            "rule": f"pii_{label}",
+                            "severity": "medium",
+                            "action": "masked",
+                            "count": len(matches),
+                        }
+                    )
 
         for term in ctx.agent.blocked_terms:
             if re.search(rf"\b{re.escape(term)}\b", response, re.I):
-                findings.append({"rule": "blocked_term", "severity": "high", "action": "blocked",
-                                 "term": term})
+                findings.append(
+                    {"rule": "blocked_term", "severity": "high", "action": "blocked", "term": term}
+                )
 
         if ctx.agent.required_disclaimer and ctx.agent.required_disclaimer not in response:
             response = f"{response}\n\n_{ctx.agent.required_disclaimer}_"
@@ -788,7 +939,9 @@ class GuardrailNode(Node):
         # NeMo output rails run last, over the response the built-in rules already
         # cleaned, so a rail sees exactly what a caller would receive.
         rail_result = await nemo_guardrails.check_output(
-            ctx.agent.key, response, user_text=_user_text(state.input),
+            ctx.agent.key,
+            response,
+            user_text=_user_text(state.input),
             context={"pii_allowlist": list(ctx.agent.pii_allowlist or [])},
         )
         if rail_result.evaluated:
@@ -800,21 +953,29 @@ class GuardrailNode(Node):
         state.guardrail_findings.extend(findings)
         state.final_response = response
         await ctx.close_span(
-            span, status="error" if blocked else "ok",
-            outputs={"findings": findings, "modified": response != original,
-                     "nemo_evaluated": rail_result.evaluated},
+            span,
+            status="error" if blocked else "ok",
+            outputs={
+                "findings": findings,
+                "modified": response != original,
+                "nemo_evaluated": rail_result.evaluated,
+            },
         )
         await ctx.emitter.emit(
             EventType.GUARDRAIL,
-            {"rails": "output", "findings": findings, "modified": response != original,
-             "blocked": bool(blocked), "nemo_evaluated": rail_result.evaluated,
-             "llm_rails": rail_result.llm_rails},
+            {
+                "rails": "output",
+                "findings": findings,
+                "modified": response != original,
+                "blocked": bool(blocked),
+                "nemo_evaluated": rail_result.evaluated,
+                "llm_rails": rail_result.llm_rails,
+            },
             node=self.key,
             log_message=f"Guardrails applied: {len(findings)} findings",
         )
         if blocked:
-            raise GuardrailViolation("Response blocked by guardrails",
-                                     details={"findings": blocked})
+            raise GuardrailViolation("Response blocked by guardrails", details={"findings": blocked})
 
 
 # --- 8. Human approval ---------------------------------------------------------
@@ -840,9 +1001,12 @@ class HumanApprovalNode(Node):
             node=self.key,
             title=f"Approve {ctx.agent.name} response",
             summary=(ctx.state.final_response or "")[:1500],
-            payload={"response": ctx.state.final_response, "citations": ctx.state.citations,
-                     "tool_calls": [t["tool"] for t in ctx.state.tool_results],
-                     "final": True},
+            payload={
+                "response": ctx.state.final_response,
+                "citations": ctx.state.citations,
+                "tool_calls": [t["tool"] for t in ctx.state.tool_results],
+                "final": True,
+            },
             risk=(ctx.state.plan or {}).get("risk_level", "medium"),
         )
         raise ApprovalPause(approval)
@@ -863,16 +1027,18 @@ class ResponseNode(Node):
             "citations": state.citations,
             "plan": state.plan,
             "tool_calls": [
-                {"tool": t["tool"], "ok": t["ok"], "latency_ms": t["latency_ms"]}
-                for t in state.tool_results
+                {"tool": t["tool"], "ok": t["ok"], "latency_ms": t["latency_ms"]} for t in state.tool_results
             ],
             "validation": state.validation_findings,
             "guardrails": state.guardrail_findings,
             "artifacts": state.artifacts,
             "usage": {
-                "tokens_input": state.tokens_input, "tokens_output": state.tokens_output,
-                "tokens_cached": state.tokens_cached, "cost_usd": round(state.cost_usd, 6),
-                "llm_calls": state.llm_calls, "tool_calls": state.tool_calls,
+                "tokens_input": state.tokens_input,
+                "tokens_output": state.tokens_output,
+                "tokens_cached": state.tokens_cached,
+                "cost_usd": round(state.cost_usd, 6),
+                "llm_calls": state.llm_calls,
+                "tool_calls": state.tool_calls,
             },
         }
         if ctx.agent.memory_enabled and state.scratch.get("memory_thread_id"):
@@ -881,7 +1047,8 @@ class ResponseNode(Node):
         await ctx.emitter.emit(
             EventType.FINAL_RESPONSE,
             {"response": state.final_response, "citations": state.citations},
-            node=self.key, log_message="Final response produced",
+            node=self.key,
+            log_message="Final response produced",
         )
 
     async def _persist_memory(self, ctx: RunContext) -> None:
@@ -894,11 +1061,19 @@ class ResponseNode(Node):
             return
         user_text = str(state.input.get("query") or state.input.get("message") or "")
         if user_text:
-            ctx.session.add(MemoryMessage(thread_id=thread.id, role="user", content=user_text,
-                                          execution_id=state.execution_id))
-        ctx.session.add(MemoryMessage(thread_id=thread.id, role="assistant",
-                                      content=state.final_response or "",
-                                      execution_id=state.execution_id))
+            ctx.session.add(
+                MemoryMessage(
+                    thread_id=thread.id, role="user", content=user_text, execution_id=state.execution_id
+                )
+            )
+        ctx.session.add(
+            MemoryMessage(
+                thread_id=thread.id,
+                role="assistant",
+                content=state.final_response or "",
+                execution_id=state.execution_id,
+            )
+        )
         thread.message_count += 2
         thread.last_activity_at = datetime.now(UTC)
         if state.scratch.get("sentiment"):
@@ -922,28 +1097,68 @@ DEFAULT_NODES: list[Node] = [
 ]
 
 GRAPH_DEFINITION = [
-    {"id": "input_rails", "label": "Input Rails", "kind": "guardrail",
-     "description": "NeMo Guardrails input rails: injection, control bypass, out-of-mandate "
-                    "requests and financial-crime facilitation."},
-    {"id": "planner", "label": "Planner", "kind": "planner",
-     "description": "Decomposes the request into an executable plan."},
-    {"id": "retriever", "label": "Retriever", "kind": "retriever",
-     "description": "Hybrid vector + keyword retrieval over connected knowledge."},
-    {"id": "memory", "label": "Memory", "kind": "memory",
-     "description": "Loads conversation history and durable facts."},
-    {"id": "llm", "label": "LLM", "kind": "llm",
-     "description": "Reasoning loop that selects tools and drafts the answer."},
-    {"id": "tools", "label": "Tools", "kind": "tool",
-     "description": "Executes tool calls against systems of record."},
-    {"id": "validation", "label": "Validation", "kind": "validation",
-     "description": "Schema, citation, groundedness and tool-success checks."},
-    {"id": "guardrails", "label": "Guardrails", "kind": "guardrail",
-     "description": "PII masking, blocked terms, disclaimers, and NeMo Guardrails "
-                    "output rails including tipping-off detection."},
-    {"id": "human_approval", "label": "Human Approval", "kind": "approval",
-     "description": "Suspends execution for a reviewer decision when policy requires."},
-    {"id": "response", "label": "Response", "kind": "response",
-     "description": "Finalises output, citations, artifacts and memory."},
+    {
+        "id": "input_rails",
+        "label": "Input Rails",
+        "kind": "guardrail",
+        "description": "NeMo Guardrails input rails: injection, control bypass, out-of-mandate "
+        "requests and financial-crime facilitation.",
+    },
+    {
+        "id": "planner",
+        "label": "Planner",
+        "kind": "planner",
+        "description": "Decomposes the request into an executable plan.",
+    },
+    {
+        "id": "retriever",
+        "label": "Retriever",
+        "kind": "retriever",
+        "description": "Hybrid vector + keyword retrieval over connected knowledge.",
+    },
+    {
+        "id": "memory",
+        "label": "Memory",
+        "kind": "memory",
+        "description": "Loads conversation history and durable facts.",
+    },
+    {
+        "id": "llm",
+        "label": "LLM",
+        "kind": "llm",
+        "description": "Reasoning loop that selects tools and drafts the answer.",
+    },
+    {
+        "id": "tools",
+        "label": "Tools",
+        "kind": "tool",
+        "description": "Executes tool calls against systems of record.",
+    },
+    {
+        "id": "validation",
+        "label": "Validation",
+        "kind": "validation",
+        "description": "Schema, citation, groundedness and tool-success checks.",
+    },
+    {
+        "id": "guardrails",
+        "label": "Guardrails",
+        "kind": "guardrail",
+        "description": "PII masking, blocked terms, disclaimers, and NeMo Guardrails "
+        "output rails including tipping-off detection.",
+    },
+    {
+        "id": "human_approval",
+        "label": "Human Approval",
+        "kind": "approval",
+        "description": "Suspends execution for a reviewer decision when policy requires.",
+    },
+    {
+        "id": "response",
+        "label": "Response",
+        "kind": "response",
+        "description": "Finalises output, citations, artifacts and memory.",
+    },
 ]
 
 GRAPH_EDGES = [

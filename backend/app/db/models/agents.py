@@ -119,9 +119,7 @@ class Span(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "spans"
     __table_args__ = (Index("ix_span_exec_start", "execution_id", "start_time"),)
 
-    execution_id: Mapped[str] = mapped_column(
-        ForeignKey("executions.id", ondelete="CASCADE"), index=True
-    )
+    execution_id: Mapped[str] = mapped_column(ForeignKey("executions.id", ondelete="CASCADE"), index=True)
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
     span_id: Mapped[str] = mapped_column(String(64), index=True)
     parent_span_id: Mapped[str | None] = mapped_column(String(64), index=True, default=None)
@@ -150,9 +148,7 @@ class ExecutionEvent(Base, UUIDMixin):
     __tablename__ = "execution_events"
     __table_args__ = (Index("ix_event_exec_seq", "execution_id", "sequence"),)
 
-    execution_id: Mapped[str] = mapped_column(
-        ForeignKey("executions.id", ondelete="CASCADE"), index=True
-    )
+    execution_id: Mapped[str] = mapped_column(ForeignKey("executions.id", ondelete="CASCADE"), index=True)
     sequence: Mapped[int] = mapped_column(Integer)
     type: Mapped[str] = mapped_column(String(60), index=True)
     node: Mapped[str | None] = mapped_column(String(60), default=None)
@@ -184,9 +180,7 @@ class LogRecord(Base, UUIDMixin):
 class Approval(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "approvals"
 
-    execution_id: Mapped[str] = mapped_column(
-        ForeignKey("executions.id", ondelete="CASCADE"), index=True
-    )
+    execution_id: Mapped[str] = mapped_column(ForeignKey("executions.id", ondelete="CASCADE"), index=True)
     agent_key: Mapped[str] = mapped_column(String(80), index=True)
     node: Mapped[str] = mapped_column(String(60), default="human_approval")
     title: Mapped[str] = mapped_column(String(240))

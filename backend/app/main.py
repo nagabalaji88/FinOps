@@ -144,8 +144,10 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     log.warning("app_error", code=exc.code, message=exc.message, path=request.url.path)
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": {"code": exc.code, "message": exc.message, "details": exc.details},
-                 "request_id": request_id_ctx.get()},
+        content={
+            "error": {"code": exc.code, "message": exc.message, "details": exc.details},
+            "request_id": request_id_ctx.get(),
+        },
     )
 
 
@@ -153,9 +155,14 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
 async def validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     return JSONResponse(
         status_code=422,
-        content={"error": {"code": "request_validation_error", "message": "Invalid request",
-                           "details": {"errors": exc.errors()[:20]}},
-                 "request_id": request_id_ctx.get()},
+        content={
+            "error": {
+                "code": "request_validation_error",
+                "message": "Invalid request",
+                "details": {"errors": exc.errors()[:20]},
+            },
+            "request_id": request_id_ctx.get(),
+        },
     )
 
 
@@ -164,10 +171,14 @@ async def unhandled_handler(request: Request, exc: Exception) -> JSONResponse:
     log.exception("unhandled_error", path=request.url.path, error=str(exc))
     return JSONResponse(
         status_code=500,
-        content={"error": {"code": "internal_error",
-                           "message": "An unexpected error occurred",
-                           "details": {"type": type(exc).__name__} if settings.debug else {}},
-                 "request_id": request_id_ctx.get()},
+        content={
+            "error": {
+                "code": "internal_error",
+                "message": "An unexpected error occurred",
+                "details": {"type": type(exc).__name__} if settings.debug else {},
+            },
+            "request_id": request_id_ctx.get(),
+        },
     )
 
 
@@ -195,7 +206,9 @@ async def readiness() -> Response:
     body = {
         "status": "ready" if ready else "not_ready",
         "checks": checks,
-        "warnings": [] if providers else [
+        "warnings": []
+        if providers
+        else [
             "No LLM provider configured - agent executions will fail with "
             "provider_not_configured until one is set"
         ],

@@ -80,14 +80,12 @@ async def current_principal(
     elif credentials and credentials.scheme.lower() == "bearer":
         principal = await _principal_from_jwt(session, credentials.credentials)
     else:
-        raise AuthError("Authentication required",
-                        details={"schemes": ["Bearer JWT", "X-API-Key"]})
+        raise AuthError("Authentication required", details={"schemes": ["Bearer JWT", "X-API-Key"]})
 
     user_id_ctx.set(principal.id)
     request.state.principal = principal
     key = principal.api_key.id if principal.api_key else principal.id
-    rate = principal.api_key.rate_limit_per_minute if principal.api_key \
-        else settings.rate_limit_per_minute
+    rate = principal.api_key.rate_limit_per_minute if principal.api_key else settings.rate_limit_per_minute
     if rate != limiter.capacity:
         await TokenBucketLimiter(rate).enforce(key)
     else:
@@ -97,9 +95,7 @@ async def current_principal(
 
 async def _principal_from_jwt(session: AsyncSession, token: str) -> Principal:
     payload = decode_token(token)
-    user = (
-        await session.execute(select(User).where(User.id == payload.get("sub")))
-    ).scalar_one_or_none()
+    user = (await session.execute(select(User).where(User.id == payload.get("sub")))).scalar_one_or_none()
     if user is None or not user.is_active:
         raise AuthError("User is not active")
     return Principal(user, auth_method="jwt")
@@ -107,18 +103,14 @@ async def _principal_from_jwt(session: AsyncSession, token: str) -> Principal:
 
 async def _principal_from_api_key(session: AsyncSession, raw_key: str) -> Principal:
     hashed = hash_api_key(raw_key)
-    api_key = (
-        await session.execute(select(ApiKey).where(ApiKey.hashed_key == hashed))
-    ).scalar_one_or_none()
+    api_key = (await session.execute(select(ApiKey).where(ApiKey.hashed_key == hashed))).scalar_one_or_none()
     if api_key is None:
         raise AuthError("Invalid API key")
     if api_key.revoked_at is not None:
         raise AuthError("API key has been revoked")
     if api_key.expires_at and api_key.expires_at < datetime.now(UTC):
         raise AuthError("API key has expired")
-    user = (
-        await session.execute(select(User).where(User.id == api_key.user_id))
-    ).scalar_one_or_none()
+    user = (await session.execute(select(User).where(User.id == api_key.user_id))).scalar_one_or_none()
     if user is None or not user.is_active:
         raise AuthError("API key owner is not active")
     api_key.last_used_at = datetime.now(UTC)

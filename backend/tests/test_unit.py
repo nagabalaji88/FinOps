@@ -115,8 +115,7 @@ class TestResilience:
             raise ValueError("permanent")
 
         with pytest.raises(ValueError):
-            await with_retry(fails, RetryPolicy(max_attempts=3, base_delay=0.01,
-                                                give_up_on=(ValueError,)))
+            await with_retry(fails, RetryPolicy(max_attempts=3, base_delay=0.01, give_up_on=(ValueError,)))
 
     async def test_circuit_breaker_opens_and_recovers(self):
         breaker = CircuitBreaker("test", failure_threshold=2, recovery_seconds=0.2)
@@ -188,11 +187,13 @@ class TestEmbeddings:
     def test_similar_text_scores_higher(self):
         import numpy as np
 
-        vectors = local_embed([
-            "sanctions screening policy for onboarding",
-            "sanctions screening during customer onboarding",
-            "credit card reward points redemption",
-        ])
+        vectors = local_embed(
+            [
+                "sanctions screening policy for onboarding",
+                "sanctions screening during customer onboarding",
+                "credit card reward points redemption",
+            ]
+        )
         v = [np.array(x) for x in vectors]
         assert float(v[0] @ v[1]) > float(v[0] @ v[2])
 
@@ -270,8 +271,8 @@ class TestSettingsParsing:
 
     def test_the_default_covers_both_dev_servers(self):
         origins = self._origins(None)
-        assert "http://localhost:5173" in origins   # platform console
-        assert "http://localhost:5174" in origins   # execute console
+        assert "http://localhost:5173" in origins  # platform console
+        assert "http://localhost:5174" in origins  # execute console
 
     def test_malformed_json_explains_itself(self):
         import pytest

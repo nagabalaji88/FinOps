@@ -67,7 +67,10 @@ class LLMProvider(abc.ABC):
     ) -> AsyncIterator[StreamChunk]:
         """Default: providers that do not implement streaming yield one final chunk."""
         response = await self.chat(
-            model=model, messages=messages, tools=tools, temperature=temperature,
+            model=model,
+            messages=messages,
+            tools=tools,
+            temperature=temperature,
             max_tokens=max_tokens,
         )
         yield StreamChunk(delta=response.content)

@@ -75,6 +75,7 @@ class ArtifactStore:
 
     async def get(self, key: str) -> bytes:
         if self._client is not None:
+
             def _read() -> bytes:
                 resp = self._client.get_object(settings.minio_bucket, key)
                 try:

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import ColumnElement, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -23,9 +23,41 @@ log = get_logger("rag")
 
 WORD_RE = re.compile(r"[a-z0-9']+")
 STOPWORDS = {
-    "the", "a", "an", "and", "or", "of", "to", "in", "is", "are", "for", "on", "with", "as",
-    "by", "at", "from", "that", "this", "it", "be", "we", "our", "you", "your", "what", "how",
-    "which", "when", "who", "can", "do", "does", "if", "not",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "of",
+    "to",
+    "in",
+    "is",
+    "are",
+    "for",
+    "on",
+    "with",
+    "as",
+    "by",
+    "at",
+    "from",
+    "that",
+    "this",
+    "it",
+    "be",
+    "we",
+    "our",
+    "you",
+    "your",
+    "what",
+    "how",
+    "which",
+    "when",
+    "who",
+    "can",
+    "do",
+    "does",
+    "if",
+    "not",
 }
 
 
@@ -155,8 +187,9 @@ class RagPipeline:
             document.chunk_count = 0
             return document
 
-        batch = await embed_texts([p.content for p in pieces],
-                                  context={"source": source.key, "document_id": document.id})
+        batch = await embed_texts(
+            [p.content for p in pieces], context={"source": source.key, "document_id": document.id}
+        )
         chunks: list[Chunk] = []
         for piece, vector in zip(pieces, batch.vectors, strict=False):
             chunk = Chunk(
@@ -180,14 +213,18 @@ class RagPipeline:
         document.embedding_status = "embedded"
 
         source.document_count = int(
-            (await session.execute(
-                select(func.count()).select_from(Document).where(Document.source_id == source.id)
-            )).scalar_one()
+            (
+                await session.execute(
+                    select(func.count()).select_from(Document).where(Document.source_id == source.id)
+                )
+            ).scalar_one()
         )
         source.chunk_count = int(
-            (await session.execute(
-                select(func.count()).select_from(Chunk).where(Chunk.source_key == source.key)
-            )).scalar_one()
+            (
+                await session.execute(
+                    select(func.count()).select_from(Chunk).where(Chunk.source_key == source.key)
+                )
+            ).scalar_one()
         )
         source.embedding_model = batch.model
         source.vector_dimensions = batch.dimensions
@@ -211,8 +248,11 @@ class RagPipeline:
         batch = await embed_texts([query], context={"agent": agent_key, "execution_id": execution_id})
         store = get_vector_store()
         vector_matches = await store.search(
-            session, batch.vectors[0] if batch.vectors else [],
-            top_k=max(top_k * 4, 20), source_keys=source_keys, min_score=0.0,
+            session,
+            batch.vectors[0] if batch.vectors else [],
+            top_k=max(top_k * 4, 20),
+            source_keys=source_keys,
+            min_score=0.0,
         )
 
         matches = vector_matches
@@ -237,8 +277,11 @@ class RagPipeline:
                 for m in vector_matches:
                     normalised_bm = (bm25_scores[m.chunk_id] / max_bm25) if max_bm25 else 0.0
                     combined = 0.65 * max(m.score, 0.0) + 0.35 * normalised_bm
-                    m.metadata = {**(m.metadata or {}), "vector_score": round(m.score, 4),
-                                  "keyword_score": round(normalised_bm, 4)}
+                    m.metadata = {
+                        **(m.metadata or {}),
+                        "vector_score": round(m.score, 4),
+                        "keyword_score": round(normalised_bm, 4),
+                    }
                     m.score = combined
                     scored.append((combined, m))
                 scored.sort(key=lambda x: x[0], reverse=True)
@@ -249,15 +292,25 @@ class RagPipeline:
 
         session.add(
             SearchQueryLog(
-                timestamp=datetime.now(UTC), query=query[:2000], agent_key=agent_key,
-                execution_id=execution_id, collection=store.backend, backend=store.backend,
-                top_k=top_k, result_count=len(matches), latency_ms=latency_ms,
+                timestamp=datetime.now(UTC),
+                query=query[:2000],
+                agent_key=agent_key,
+                execution_id=execution_id,
+                collection=store.backend,
+                backend=store.backend,
+                top_k=top_k,
+                result_count=len(matches),
+                latency_ms=latency_ms,
                 top_score=matches[0].score if matches else None,
             )
         )
         return RetrievedContext(
-            matches=matches, latency_ms=latency_ms, method=batch.method,
-            embedding_model=batch.model, backend=store.backend, query=query,
+            matches=matches,
+            latency_ms=latency_ms,
+            method=batch.method,
+            embedding_model=batch.model,
+            backend=store.backend,
+            query=query,
         )
 
     async def _keyword_candidates(
@@ -266,7 +319,7 @@ class RagPipeline:
         stmt = select(Chunk, Document).join(Document, Chunk.document_id == Document.id)
         if source_keys:
             stmt = stmt.where(Chunk.source_key.in_(source_keys))
-        clause = None
+        clause: ColumnElement[bool] | None = None
         for term in terms[:6]:
             cond = Chunk.content.ilike(f"%{term}%")
             clause = cond if clause is None else (clause | cond)
@@ -275,8 +328,14 @@ class RagPipeline:
         rows = (await session.execute(stmt.limit(limit))).all()
         return [
             VectorMatch(
-                chunk_id=c.id, document_id=c.document_id, source_key=c.source_key,
-                content=c.content, score=0.0, heading=c.heading, title=d.title, uri=d.uri,
+                chunk_id=c.id,
+                document_id=c.document_id,
+                source_key=c.source_key,
+                content=c.content,
+                score=0.0,
+                heading=c.heading,
+                title=d.title,
+                uri=d.uri,
                 chunk_index=c.chunk_index,
                 metadata={**(c.chunk_metadata or {}), "classification": d.classification},
             )
@@ -285,15 +344,22 @@ class RagPipeline:
 
     async def reindex_source(self, session: AsyncSession, source: KnowledgeSource) -> dict[str, Any]:
         docs = (
-            await session.execute(select(Document).where(Document.source_id == source.id))
-        ).scalars().all()
+            (await session.execute(select(Document).where(Document.source_id == source.id))).scalars().all()
+        )
         reindexed = 0
         for doc in docs:
             await session.execute(delete(Chunk).where(Chunk.document_id == doc.id))
             await self.ingest_document(
-                session, source=source, title=doc.title, content=doc.content, uri=doc.uri,
-                external_id=doc.external_id, mime_type=doc.mime_type, author=doc.author,
-                classification=doc.classification, metadata=doc.doc_metadata,
+                session,
+                source=source,
+                title=doc.title,
+                content=doc.content,
+                uri=doc.uri,
+                external_id=doc.external_id,
+                mime_type=doc.mime_type,
+                author=doc.author,
+                classification=doc.classification,
+                metadata=doc.doc_metadata,
             )
             reindexed += 1
         return {"source": source.key, "documents_reindexed": reindexed}

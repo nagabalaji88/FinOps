@@ -45,8 +45,7 @@ async def evaluate_execution(session: AsyncSession, execution_id: str) -> dict[s
     if execution is None:
         raise NotFoundError("Execution not found")
     if execution.status != "succeeded":
-        raise ValidationError(f"Only succeeded executions can be evaluated (status: "
-                              f"{execution.status})")
+        raise ValidationError(f"Only succeeded executions can be evaluated (status: {execution.status})")
 
     output = execution.output or {}
     response = execution.final_response or ""
@@ -57,9 +56,7 @@ async def evaluate_execution(session: AsyncSession, execution_id: str) -> dict[s
     tool_success_rate = (len(successful_tools) / len(tool_calls)) if tool_calls else 1.0
 
     cited_markers = set(re.findall(r"\[(\d+)\]", response))
-    citation_score = (
-        len(cited_markers) / len(citations) if citations else (1.0 if not citations else 0.0)
-    )
+    citation_score = len(cited_markers) / len(citations) if citations else (1.0 if not citations else 0.0)
     citation_score = min(citation_score, 1.0)
 
     context_tokens: set[str] = set()
@@ -70,7 +67,8 @@ async def evaluate_execution(session: AsyncSession, execution_id: str) -> dict[s
     response_tokens = _tokens(response)
     groundedness = (
         len(response_tokens & context_tokens) / len(response_tokens)
-        if response_tokens and context_tokens else (1.0 if not context_tokens else 0.0)
+        if response_tokens and context_tokens
+        else (1.0 if not context_tokens else 0.0)
     )
 
     faithfulness: float | None = None
@@ -81,18 +79,25 @@ async def evaluate_execution(session: AsyncSession, execution_id: str) -> dict[s
 
     if router.available_models(embeddings=False):
         try:
-            context_block = json.dumps({
-                "question": execution.input,
-                "citations": citations[:8],
-                "tool_results": tool_calls[:12],
-            }, default=str)[:12000]
+            context_block = json.dumps(
+                {
+                    "question": execution.input,
+                    "citations": citations[:8],
+                    "tool_results": tool_calls[:12],
+                },
+                default=str,
+            )[:12000]
             judgement = await router.chat(
                 messages=[
                     Message(role="system", content=JUDGE_PROMPT),
-                    Message(role="user",
-                            content=f"CONTEXT:\n{context_block}\n\nRESPONSE:\n{response[:8000]}"),
+                    Message(
+                        role="user", content=f"CONTEXT:\n{context_block}\n\nRESPONSE:\n{response[:8000]}"
+                    ),
                 ],
-                temperature=0.0, max_tokens=500, json_mode=True, tier="fast",
+                temperature=0.0,
+                max_tokens=500,
+                json_mode=True,
+                tier="fast",
                 context={"agent_key": "evaluator", "execution_id": execution_id},
             )
             judge_model = judgement.model
@@ -106,13 +111,15 @@ async def evaluate_execution(session: AsyncSession, execution_id: str) -> dict[s
 
     evaluation = (
         await session.execute(
-            select(Evaluation).where(Evaluation.execution_id == execution_id,
-                                     Evaluation.evaluator == "automatic")
+            select(Evaluation).where(
+                Evaluation.execution_id == execution_id, Evaluation.evaluator == "automatic"
+            )
         )
     ).scalar_one_or_none()
     if evaluation is None:
-        evaluation = Evaluation(execution_id=execution_id, agent_key=execution.agent_key,
-                                evaluator="automatic")
+        evaluation = Evaluation(
+            execution_id=execution_id, agent_key=execution.agent_key, evaluator="automatic"
+        )
         session.add(evaluation)
     evaluation.faithfulness = faithfulness
     evaluation.groundedness = round(groundedness, 4)

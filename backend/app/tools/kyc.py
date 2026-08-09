@@ -21,10 +21,15 @@ from sqlalchemy import select
 from app.core.errors import NotFoundError, ProviderNotConfiguredError, ValidationError
 from app.core.storage import store
 from app.db.models.banking import KycCase, KycDocument, SanctionsEntry
+from app.llm.base import LLMProvider
+from app.llm.providers.openai_compat import OpenAICompatProvider
 from app.llm.router import router
 from app.tools.base import ToolContext, tool
 
 # --- checksum algorithms ------------------------------------------------------
+# fmt: off
+# The Verhoeff dihedral and permutation tables are read as 10x10 grids; one row per line
+# is what makes a transcription error visible.
 VERHOEFF_D = [
     [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
     [2, 3, 4, 0, 1, 7, 8, 9, 5, 6], [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
@@ -38,6 +43,7 @@ VERHOEFF_P = [
     [9, 4, 5, 3, 1, 2, 6, 8, 7, 0], [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
     [2, 7, 9, 3, 8, 0, 6, 4, 1, 5], [7, 0, 4, 6, 9, 1, 3, 2, 5, 8],
 ]
+# fmt: on
 
 
 def verhoeff_valid(number: str) -> bool:
@@ -68,9 +74,16 @@ def mrz_check_digit(value: str) -> int:
 
 PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 PAN_HOLDER_TYPES = {
-    "P": "Individual", "C": "Company", "H": "HUF", "F": "Firm", "A": "AOP",
-    "T": "Trust", "B": "Body of Individuals", "L": "Local Authority",
-    "J": "Artificial Juridical Person", "G": "Government",
+    "P": "Individual",
+    "C": "Company",
+    "H": "HUF",
+    "F": "Firm",
+    "A": "AOP",
+    "T": "Trust",
+    "B": "Body of Individuals",
+    "L": "Local Authority",
+    "J": "Artificial Juridical Person",
+    "G": "Government",
 }
 
 
@@ -98,8 +111,9 @@ class OcrArgs(BaseModel):
     doc_type: str | None = Field(default=None, description="passport|pan|aadhaar|selfie|utility_bill")
 
 
-async def _load_document(ctx: ToolContext, case_number: str, document_id: str | None,
-                         doc_type: str | None) -> tuple[KycCase, KycDocument]:
+async def _load_document(
+    ctx: ToolContext, case_number: str, document_id: str | None, doc_type: str | None
+) -> tuple[KycCase, KycDocument]:
     case = (
         await ctx.session.execute(select(KycCase).where(KycCase.case_number == case_number))
     ).scalar_one_or_none()
@@ -112,9 +126,38 @@ async def _load_document(ctx: ToolContext, case_number: str, document_id: str | 
         stmt = stmt.where(KycDocument.doc_type == doc_type)
     doc = (await ctx.session.execute(stmt)).scalars().first()
     if doc is None:
-        raise NotFoundError("No matching document uploaded for this case",
-                            details={"case": case_number, "doc_type": doc_type})
+        raise NotFoundError(
+            "No matching document uploaded for this case", details={"case": case_number, "doc_type": doc_type}
+        )
     return case, doc
+
+
+def _openai_compatible(provider: LLMProvider | None, name: str) -> OpenAICompatProvider:
+    """Narrow a provider to the one shape the chat-completions call below understands.
+
+    `base_url` and `api_key` exist only on the OpenAI-compatible adapter — Anthropic is
+    handled by its own branch, and Google and Bedrock have neither. Reaching for those
+    attributes on any other provider is an AttributeError at the worst possible moment, so
+    the mismatch is refused here with a message naming the provider that cannot serve the
+    request.
+    """
+    if not isinstance(provider, OpenAICompatProvider):
+        raise ProviderNotConfiguredError(
+            f"Vision model provider '{name}' does not expose an OpenAI-compatible chat-completions endpoint",
+            details={
+                "provider": name,
+                "supported": [
+                    "anthropic",
+                    "openai",
+                    "azure_openai",
+                    "mistral",
+                    "deepseek",
+                    "together",
+                    "ollama",
+                ],
+            },
+        )
+    return provider
 
 
 async def _ocr_bytes(data: bytes, mime_type: str) -> tuple[str, str]:
@@ -158,46 +201,64 @@ async def _ocr_bytes(data: bytes, mime_type: str) -> tuple[str, str]:
     provider = router.provider(spec.provider)
     if spec.provider == "anthropic":
         payload = {
-            "messages": [{"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": mime_type,
-                                             "data": b64}},
-                {"type": "text", "text": "Transcribe all text in this identity document verbatim, "
-                                         "including any machine readable zone."},
-            ]}],
-            "max_tokens": 2000, "model": spec.id,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": b64}},
+                        {
+                            "type": "text",
+                            "text": "Transcribe all text in this identity document verbatim, "
+                            "including any machine readable zone.",
+                        },
+                    ],
+                }
+            ],
+            "max_tokens": 2000,
+            "model": spec.id,
         }
         from app.core.config import settings as _s
         from app.llm.base import http_client
 
         resp = await http_client().post(
             f"{_s.anthropic_base_url}/v1/messages",
-            headers={"x-api-key": _s.anthropic_api_key or "", "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"},
+            headers={
+                "x-api-key": _s.anthropic_api_key or "",
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
             json=payload,
         )
         if resp.status_code >= 400:
             raise ProviderNotConfiguredError(f"Vision OCR failed: {resp.text[:400]}")
         blocks = resp.json().get("content", [])
-        return "".join(b.get("text", "") for b in blocks if b.get("type") == "text"), \
-            f"vision:{spec.id}"
+        return "".join(b.get("text", "") for b in blocks if b.get("type") == "text"), f"vision:{spec.id}"
 
     # OpenAI-compatible vision
     from app.llm.base import http_client
 
+    endpoint = _openai_compatible(provider, spec.provider)
     body = {
         "model": spec.id,
-        "messages": [{"role": "user", "content": [
-            {"type": "text", "text": "Transcribe all text in this identity document verbatim, "
-                                     "including any machine readable zone."},
-            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
-        ]}],
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Transcribe all text in this identity document verbatim, "
+                        "including any machine readable zone.",
+                    },
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
+                ],
+            }
+        ],
         "max_tokens": 2000,
     }
     headers = {"Content-Type": "application/json"}
-    if getattr(provider, "api_key", None):
-        headers["Authorization"] = f"Bearer {provider.api_key}"  # type: ignore[union-attr]
-    resp = await http_client().post(f"{provider.base_url}/chat/completions",  # type: ignore[union-attr]
-                                    headers=headers, json=body)
+    if endpoint.api_key:
+        headers["Authorization"] = f"Bearer {endpoint.api_key}"
+    resp = await http_client().post(f"{endpoint.base_url}/chat/completions", headers=headers, json=body)
     if resp.status_code >= 400:
         raise ProviderNotConfiguredError(f"Vision OCR failed: {resp.text[:400]}")
     return resp.json()["choices"][0]["message"]["content"], f"vision:{spec.id}"
@@ -214,8 +275,14 @@ async def _ocr_bytes(data: bytes, mime_type: str) -> tuple[str, str]:
 async def ocr_document(args: OcrArgs, ctx: ToolContext) -> dict[str, Any]:
     _, doc = await _load_document(ctx, args.case_number, args.document_id, args.doc_type)
     if doc.ocr_text:
-        return {"document_id": doc.id, "doc_type": doc.doc_type, "engine": doc.ocr_engine,
-                "characters": len(doc.ocr_text), "text": doc.ocr_text[:6000], "cached": True}
+        return {
+            "document_id": doc.id,
+            "doc_type": doc.doc_type,
+            "engine": doc.ocr_engine,
+            "characters": len(doc.ocr_text),
+            "text": doc.ocr_text[:6000],
+            "cached": True,
+        }
     if not doc.artifact_uri:
         raise ValidationError("Document has no stored artifact to OCR")
     key = doc.artifact_uri.split("/", 3)[-1] if "://" in doc.artifact_uri else doc.artifact_uri
@@ -224,8 +291,14 @@ async def ocr_document(args: OcrArgs, ctx: ToolContext) -> dict[str, Any]:
     doc.ocr_text = text
     doc.ocr_engine = engine
     await ctx.session.flush()
-    return {"document_id": doc.id, "doc_type": doc.doc_type, "engine": engine,
-            "characters": len(text), "text": text[:6000], "cached": False}
+    return {
+        "document_id": doc.id,
+        "doc_type": doc.doc_type,
+        "engine": engine,
+        "characters": len(text),
+        "text": text[:6000],
+        "cached": False,
+    }
 
 
 class ClassifyArgs(BaseModel):
@@ -265,9 +338,13 @@ async def classify_document(args: ClassifyArgs, ctx: ToolContext) -> dict[str, A
     if confidence >= 0.34:
         doc.doc_type = best
     await ctx.session.flush()
-    return {"document_id": doc.id, "predicted_type": best, "confidence": round(confidence, 3),
-            "scores": {k: round(v, 3) for k, v in scores.items()},
-            "applied": confidence >= 0.34}
+    return {
+        "document_id": doc.id,
+        "predicted_type": best,
+        "confidence": round(confidence, 3),
+        "scores": {k: round(v, 3) for k, v in scores.items()},
+        "applied": confidence >= 0.34,
+    }
 
 
 # --- document verification -----------------------------------------------------
@@ -302,22 +379,22 @@ async def verify_passport(args: VerifyPassportArgs, ctx: ToolContext) -> dict[st
         fields["surname"] = names[0].replace("<", " ").strip()
         fields["given_names"] = names[1].replace("<", " ").strip() if len(names) > 1 else ""
         fields["passport_number"] = l2[0:9].replace("<", "")
-        checks["passport_number_check"] = mrz_check_digit(l2[0:9]) == int(l2[9]) if l2[9].isdigit() \
-            else False
+        checks["passport_number_check"] = mrz_check_digit(l2[0:9]) == int(l2[9]) if l2[9].isdigit() else False
         fields["nationality"] = l2[10:13].replace("<", "")
         fields["date_of_birth"] = l2[13:19]
         checks["dob_check"] = mrz_check_digit(l2[13:19]) == int(l2[19]) if l2[19].isdigit() else False
         fields["sex"] = l2[20]
         fields["expiry_date"] = l2[21:27]
-        checks["expiry_check"] = mrz_check_digit(l2[21:27]) == int(l2[27]) if l2[27].isdigit() \
-            else False
+        checks["expiry_check"] = mrz_check_digit(l2[21:27]) == int(l2[27]) if l2[27].isdigit() else False
         composite = l2[0:10] + l2[13:20] + l2[21:28] + l2[28:43]
-        checks["composite_check"] = mrz_check_digit(composite) == int(l2[43]) if l2[43].isdigit() \
-            else False
+        checks["composite_check"] = mrz_check_digit(composite) == int(l2[43]) if l2[43].isdigit() else False
         try:
             yy = int(fields["expiry_date"][0:2])
-            expiry = date(2000 + yy if yy < 70 else 1900 + yy, int(fields["expiry_date"][2:4]),
-                          int(fields["expiry_date"][4:6]))
+            expiry = date(
+                2000 + yy if yy < 70 else 1900 + yy,
+                int(fields["expiry_date"][2:4]),
+                int(fields["expiry_date"][4:6]),
+            )
             fields["expiry_iso"] = expiry.isoformat()
             checks["not_expired"] = expiry > date.today()
         except ValueError:
@@ -333,19 +410,32 @@ async def verify_passport(args: VerifyPassportArgs, ctx: ToolContext) -> dict[st
     similarity = name_similarity(full_name, case.applicant_name) if full_name else 0.0
     checks["name_matches_application"] = similarity >= 0.75
     if not checks["name_matches_application"] and full_name:
-        findings.append(f"Name mismatch: document '{full_name}' vs application "
-                        f"'{case.applicant_name}' (similarity {similarity})")
+        findings.append(
+            f"Name mismatch: document '{full_name}' vs application "
+            f"'{case.applicant_name}' (similarity {similarity})"
+        )
 
     passed = all(v for k, v in checks.items())
     doc.extracted_fields = {**(doc.extracted_fields or {}), **fields}
     doc.verification_status = "verified" if passed else "failed"
     doc.verification_notes = findings
-    case.findings = [*(case.findings or []),
-                     {"check": "passport", "status": doc.verification_status,
-                      "detail": findings or "All MRZ checks passed"}]
+    case.findings = [
+        *(case.findings or []),
+        {
+            "check": "passport",
+            "status": doc.verification_status,
+            "detail": findings or "All MRZ checks passed",
+        },
+    ]
     await ctx.session.flush()
-    return {"document_id": doc.id, "verified": passed, "checks": checks, "fields": fields,
-            "name_similarity": similarity, "findings": findings}
+    return {
+        "document_id": doc.id,
+        "verified": passed,
+        "checks": checks,
+        "fields": fields,
+        "name_similarity": similarity,
+        "findings": findings,
+    }
 
 
 class VerifyPanArgs(BaseModel):
@@ -381,15 +471,24 @@ async def verify_pan(args: VerifyPanArgs, ctx: ToolContext) -> dict[str, Any]:
     )
     findings = [k for k, v in checks.items() if not v]
     verified = checks["format_valid"] and checks["holder_type_known"]
-    doc.extracted_fields = {**(doc.extracted_fields or {}), "pan_number": pan,
-                            "holder_type": holder_type}
+    doc.extracted_fields = {**(doc.extracted_fields or {}), "pan_number": pan, "holder_type": holder_type}
     doc.verification_status = "verified" if verified else "failed"
-    case.findings = [*(case.findings or []),
-                     {"check": "pan", "status": doc.verification_status,
-                      "detail": f"PAN {pan or 'not found'}; failed checks: {findings}"}]
+    case.findings = [
+        *(case.findings or []),
+        {
+            "check": "pan",
+            "status": doc.verification_status,
+            "detail": f"PAN {pan or 'not found'}; failed checks: {findings}",
+        },
+    ]
     await ctx.session.flush()
-    return {"pan_number": pan, "verified": verified, "holder_type": holder_type, "checks": checks,
-            "failed_checks": findings}
+    return {
+        "pan_number": pan,
+        "verified": verified,
+        "holder_type": holder_type,
+        "checks": checks,
+        "failed_checks": findings,
+    }
 
 
 class VerifyAadhaarArgs(BaseModel):
@@ -418,15 +517,18 @@ async def verify_aadhaar(args: VerifyAadhaarArgs, ctx: ToolContext) -> dict[str,
         "not_starting_with_0_or_1": bool(number) and number[0] not in "01",
     }
     verified = all(checks.values())
-    doc.extracted_fields = {**(doc.extracted_fields or {}),
-                            "aadhaar_last4": number[-4:] if number else None}
+    doc.extracted_fields = {**(doc.extracted_fields or {}), "aadhaar_last4": number[-4:] if number else None}
     doc.verification_status = "verified" if verified else "failed"
-    case.findings = [*(case.findings or []),
-                     {"check": "aadhaar", "status": doc.verification_status,
-                      "detail": f"Verhoeff checksum {'passed' if verified else 'failed'}"}]
+    case.findings = [
+        *(case.findings or []),
+        {
+            "check": "aadhaar",
+            "status": doc.verification_status,
+            "detail": f"Verhoeff checksum {'passed' if verified else 'failed'}",
+        },
+    ]
     await ctx.session.flush()
-    return {"aadhaar_last4": number[-4:] if number else None, "verified": verified,
-            "checks": checks}
+    return {"aadhaar_last4": number[-4:] if number else None, "verified": verified, "checks": checks}
 
 
 class FaceMatchArgs(BaseModel):
@@ -449,23 +551,24 @@ async def face_match(args: FaceMatchArgs, ctx: ToolContext) -> dict[str, Any]:
     if case is None:
         raise NotFoundError(f"KYC case '{args.case_number}' not found")
     docs = (
-        await ctx.session.execute(select(KycDocument).where(KycDocument.case_id == case.id))
-    ).scalars().all()
+        (await ctx.session.execute(select(KycDocument).where(KycDocument.case_id == case.id))).scalars().all()
+    )
     selfie = next((d for d in docs if d.doc_type == "selfie"), None)
-    identity = next((d for d in docs if d.doc_type in {"passport", "aadhaar", "driving_licence"}),
-                    None)
+    identity = next((d for d in docs if d.doc_type in {"passport", "aadhaar", "driving_licence"}), None)
     if selfie is None or identity is None:
-        raise ValidationError("Both a selfie and a photo identity document are required",
-                              details={"has_selfie": selfie is not None,
-                                       "has_identity_document": identity is not None})
+        raise ValidationError(
+            "Both a selfie and a photo identity document are required",
+            details={"has_selfie": selfie is not None, "has_identity_document": identity is not None},
+        )
 
     vision = [m for m in router.available_models(embeddings=False) if m.supports_vision]
     if not vision:
         raise ProviderNotConfiguredError(
             "Face matching requires a vision-capable model provider or a dedicated biometric "
             "service; none is configured",
-            details={"configure": "ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY or a "
-                                  "biometric provider"},
+            details={
+                "configure": "ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY or a biometric provider"
+            },
         )
 
     selfie_bytes = await store.get(selfie.artifact_uri.split("/", 3)[-1])
@@ -482,36 +585,67 @@ async def face_match(args: FaceMatchArgs, ctx: ToolContext) -> dict[str, Any]:
     if spec.provider == "anthropic":
         content = [
             {"type": "text", "text": prompt},
-            {"type": "image", "source": {"type": "base64", "media_type": selfie.mime_type,
-                                         "data": base64.b64encode(selfie_bytes).decode()}},
-            {"type": "image", "source": {"type": "base64", "media_type": identity.mime_type,
-                                         "data": base64.b64encode(id_bytes).decode()}},
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": selfie.mime_type,
+                    "data": base64.b64encode(selfie_bytes).decode(),
+                },
+            },
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": identity.mime_type,
+                    "data": base64.b64encode(id_bytes).decode(),
+                },
+            },
         ]
         resp = await http_client().post(
             f"{_s.anthropic_base_url}/v1/messages",
-            headers={"x-api-key": _s.anthropic_api_key or "", "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"},
-            json={"model": spec.id, "max_tokens": 700, "messages": [{"role": "user",
-                                                                     "content": content}]},
+            headers={
+                "x-api-key": _s.anthropic_api_key or "",
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={"model": spec.id, "max_tokens": 700, "messages": [{"role": "user", "content": content}]},
         )
         raw = "".join(b.get("text", "") for b in resp.json().get("content", []))
     else:
-        provider = router.provider(spec.provider)
+        endpoint = _openai_compatible(router.provider(spec.provider), spec.provider)
         headers = {"Content-Type": "application/json"}
-        if getattr(provider, "api_key", None):
-            headers["Authorization"] = f"Bearer {provider.api_key}"  # type: ignore[union-attr]
+        if endpoint.api_key:
+            headers["Authorization"] = f"Bearer {endpoint.api_key}"
         resp = await http_client().post(
-            f"{provider.base_url}/chat/completions",  # type: ignore[union-attr]
+            f"{endpoint.base_url}/chat/completions",
             headers=headers,
-            json={"model": spec.id, "max_tokens": 700, "messages": [{"role": "user", "content": [
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {
-                    "url": f"data:{selfie.mime_type};base64,"
-                           f"{base64.b64encode(selfie_bytes).decode()}"}},
-                {"type": "image_url", "image_url": {
-                    "url": f"data:{identity.mime_type};base64,"
-                           f"{base64.b64encode(id_bytes).decode()}"}},
-            ]}]},
+            json={
+                "model": spec.id,
+                "max_tokens": 700,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{selfie.mime_type};base64,"
+                                    f"{base64.b64encode(selfie_bytes).decode()}"
+                                },
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{identity.mime_type};base64,"
+                                    f"{base64.b64encode(id_bytes).decode()}"
+                                },
+                            },
+                        ],
+                    }
+                ],
+            },
         )
         raw = resp.json()["choices"][0]["message"]["content"]
 
@@ -524,9 +658,14 @@ async def face_match(args: FaceMatchArgs, ctx: ToolContext) -> dict[str, Any]:
             parsed = {}
     score = float(parsed.get("same_person_likelihood", 0.0))
     case.face_match_score = score
-    case.findings = [*(case.findings or []),
-                     {"check": "face_match", "status": "pass" if score >= args.threshold else "fail",
-                      "detail": f"score {score:.2f} (threshold {args.threshold})"}]
+    case.findings = [
+        *(case.findings or []),
+        {
+            "check": "face_match",
+            "status": "pass" if score >= args.threshold else "fail",
+            "detail": f"score {score:.2f} (threshold {args.threshold})",
+        },
+    ]
     await ctx.session.flush()
     return {
         "score": round(score, 4),
@@ -556,7 +695,7 @@ async def validate_address(args: AddressArgs, ctx: ToolContext) -> dict[str, Any
     declared_text = " ".join(str(v) for v in declared.values() if v)
     if not declared_text:
         raise ValidationError("Case has no declared address to validate")
-    proof_text = (doc.ocr_text or "")
+    proof_text = doc.ocr_text or ""
     if not proof_text:
         raise ValidationError("Run ocr_document on the address proof first")
 
@@ -573,14 +712,23 @@ async def validate_address(args: AddressArgs, ctx: ToolContext) -> dict[str, Any
 
     verified = coverage >= 0.5 and (postcode_found or coverage >= 0.7)
     case.address_verified = verified
-    case.findings = [*(case.findings or []),
-                     {"check": "address", "status": "pass" if verified else "fail",
-                      "detail": f"token coverage {coverage:.2f}, postcode "
-                                f"{'found' if postcode_found else 'not found'}"}]
+    case.findings = [
+        *(case.findings or []),
+        {
+            "check": "address",
+            "status": "pass" if verified else "fail",
+            "detail": f"token coverage {coverage:.2f}, postcode {'found' if postcode_found else 'not found'}",
+        },
+    ]
     await ctx.session.flush()
-    return {"verified": verified, "token_coverage": round(coverage, 3),
-            "postcode_found": postcode_found, "matched_tokens": sorted(overlap)[:25],
-            "document_date": bill_date, "proof_type": args.proof_document_type}
+    return {
+        "verified": verified,
+        "token_coverage": round(coverage, 3),
+        "postcode_found": postcode_found,
+        "matched_tokens": sorted(overlap)[:25],
+        "document_date": bill_date,
+        "proof_type": args.proof_document_type,
+    }
 
 
 # --- screening -----------------------------------------------------------------
@@ -610,20 +758,22 @@ async def _screen(ctx: ToolContext, args: ScreeningArgs, pep_only: bool) -> dict
             dob_match = None
             if args.date_of_birth and entry.date_of_birth:
                 dob_match = args.date_of_birth[:4] == entry.date_of_birth[:4]
-            hits.append({
-                "list": entry.list_name,
-                "matched_name": entry.full_name,
-                "aliases": entry.aliases,
-                "score": best,
-                "entry_type": entry.entry_type,
-                "program": entry.program,
-                "position": entry.position,
-                "nationality": entry.nationality,
-                "date_of_birth": entry.date_of_birth,
-                "dob_year_match": dob_match,
-                "source_url": entry.source_url,
-                "listed_on": entry.listed_on.isoformat() if entry.listed_on else None,
-            })
+            hits.append(
+                {
+                    "list": entry.list_name,
+                    "matched_name": entry.full_name,
+                    "aliases": entry.aliases,
+                    "score": best,
+                    "entry_type": entry.entry_type,
+                    "program": entry.program,
+                    "position": entry.position,
+                    "nationality": entry.nationality,
+                    "date_of_birth": entry.date_of_birth,
+                    "dob_year_match": dob_match,
+                    "source_url": entry.source_url,
+                    "listed_on": entry.listed_on.isoformat() if entry.listed_on else None,
+                }
+            )
     hits.sort(key=lambda h: h["score"], reverse=True)
     return {
         "query": args.full_name,
@@ -666,8 +816,16 @@ class RiskArgs(BaseModel):
 
 
 HIGH_RISK_COUNTRIES = {"IR", "KP", "SY", "AF", "MM", "YE", "SS", "CU", "VE"}
-HIGH_RISK_OCCUPATIONS = {"casino", "crypto", "arms", "precious metals", "money service",
-                         "shell company", "politician", "diplomat"}
+HIGH_RISK_OCCUPATIONS = {
+    "casino",
+    "crypto",
+    "arms",
+    "precious metals",
+    "money service",
+    "shell company",
+    "politician",
+    "diplomat",
+}
 
 
 @tool(
@@ -687,11 +845,17 @@ async def calculate_kyc_risk_score(args: RiskArgs, ctx: ToolContext) -> dict[str
     components: list[dict[str, Any]] = []
 
     sanctions_weight = 60.0 if case.sanctions_hits else 0.0
-    components.append({"factor": "sanctions_hits", "weight": sanctions_weight,
-                       "detail": f"{len(case.sanctions_hits or [])} hits"})
+    components.append(
+        {
+            "factor": "sanctions_hits",
+            "weight": sanctions_weight,
+            "detail": f"{len(case.sanctions_hits or [])} hits",
+        }
+    )
     pep_weight = 25.0 if case.pep_hits else 0.0
-    components.append({"factor": "pep_exposure", "weight": pep_weight,
-                       "detail": f"{len(case.pep_hits or [])} hits"})
+    components.append(
+        {"factor": "pep_exposure", "weight": pep_weight, "detail": f"{len(case.pep_hits or [])} hits"}
+    )
 
     country = (case.nationality or "").upper()[:2]
     geo_weight = 20.0 if country in HIGH_RISK_COUNTRIES else 0.0
@@ -703,46 +867,61 @@ async def calculate_kyc_risk_score(args: RiskArgs, ctx: ToolContext) -> dict[str
 
     doc_weight = 0.0
     docs = (
-        await ctx.session.execute(select(KycDocument).where(KycDocument.case_id == case.id))
-    ).scalars().all()
+        (await ctx.session.execute(select(KycDocument).where(KycDocument.case_id == case.id))).scalars().all()
+    )
     failed_docs = [d for d in docs if d.verification_status == "failed"]
     if failed_docs:
         doc_weight = 12.0 * len(failed_docs)
-    components.append({"factor": "document_verification", "weight": doc_weight,
-                       "detail": f"{len(failed_docs)}/{len(docs)} documents failed"})
+    components.append(
+        {
+            "factor": "document_verification",
+            "weight": doc_weight,
+            "detail": f"{len(failed_docs)}/{len(docs)} documents failed",
+        }
+    )
 
     face_weight = 0.0
     if case.face_match_score is not None and case.face_match_score < 0.75:
         face_weight = 18.0
-    components.append({"factor": "biometric_match", "weight": face_weight,
-                       "detail": f"score {case.face_match_score}"})
+    components.append(
+        {"factor": "biometric_match", "weight": face_weight, "detail": f"score {case.face_match_score}"}
+    )
 
     address_weight = 0.0 if case.address_verified else 8.0
-    components.append({"factor": "address_verification", "weight": address_weight,
-                       "detail": "verified" if case.address_verified else "unverified"})
+    components.append(
+        {
+            "factor": "address_verification",
+            "weight": address_weight,
+            "detail": "verified" if case.address_verified else "unverified",
+        }
+    )
 
     volume_weight = 0.0
     if args.expected_monthly_volume and args.annual_income:
         ratio = (args.expected_monthly_volume * 12) / max(args.annual_income, 1)
         if ratio > 1.5:
             volume_weight = min(20.0, 10.0 * ratio)
-        components.append({"factor": "volume_vs_income", "weight": volume_weight,
-                           "detail": f"ratio {ratio:.2f}"})
+        components.append(
+            {"factor": "volume_vs_income", "weight": volume_weight, "detail": f"ratio {ratio:.2f}"}
+        )
 
     score = min(100.0, sum(c["weight"] for c in components))
-    band = "critical" if score >= 75 else "high" if score >= 50 else "medium" if score >= 25 \
-        else "low"
+    band = "critical" if score >= 75 else "high" if score >= 50 else "medium" if score >= 25 else "low"
     case.risk_score = score
     case.risk_band = band
     await ctx.session.flush()
-    return {"case_number": case.case_number, "risk_score": round(score, 2), "risk_band": band,
-            "components": components,
-            "recommended_action": {
-                "low": "Standard due diligence - approve",
-                "medium": "Standard due diligence with periodic review",
-                "high": "Enhanced due diligence required before approval",
-                "critical": "Escalate to compliance; do not onboard without MLRO sign-off",
-            }[band]}
+    return {
+        "case_number": case.case_number,
+        "risk_score": round(score, 2),
+        "risk_band": band,
+        "components": components,
+        "recommended_action": {
+            "low": "Standard due diligence - approve",
+            "medium": "Standard due diligence with periodic review",
+            "high": "Enhanced due diligence required before approval",
+            "critical": "Escalate to compliance; do not onboard without MLRO sign-off",
+        }[band],
+    }
 
 
 class OnboardingReportArgs(BaseModel):
@@ -753,8 +932,7 @@ class OnboardingReportArgs(BaseModel):
 
 @tool(
     "generate_onboarding_report",
-    "Produce and store the final KYC onboarding report artifact for the case. "
-    "Requires human approval.",
+    "Produce and store the final KYC onboarding report artifact for the case. Requires human approval.",
     OnboardingReportArgs,
     category="kyc",
     writes_data=True,
@@ -770,8 +948,8 @@ async def generate_onboarding_report(args: OnboardingReportArgs, ctx: ToolContex
     if case is None:
         raise NotFoundError(f"KYC case '{args.case_number}' not found")
     docs = (
-        await ctx.session.execute(select(KycDocument).where(KycDocument.case_id == case.id))
-    ).scalars().all()
+        (await ctx.session.execute(select(KycDocument).where(KycDocument.case_id == case.id))).scalars().all()
+    )
 
     report = {
         "report_id": f"KYC-RPT-{uuid.uuid4().hex[:8].upper()}",
@@ -784,9 +962,13 @@ async def generate_onboarding_report(args: OnboardingReportArgs, ctx: ToolContex
             "declared_address": case.declared_address,
         },
         "documents": [
-            {"type": d.doc_type, "status": d.verification_status,
-             "classification_confidence": d.classification_confidence,
-             "extracted_fields": d.extracted_fields, "notes": d.verification_notes}
+            {
+                "type": d.doc_type,
+                "status": d.verification_status,
+                "classification_confidence": d.classification_confidence,
+                "extracted_fields": d.extracted_fields,
+                "notes": d.verification_notes,
+            }
             for d in docs
         ],
         "screening": {"sanctions_hits": case.sanctions_hits, "pep_hits": case.pep_hits},
@@ -811,5 +993,9 @@ async def generate_onboarding_report(args: OnboardingReportArgs, ctx: ToolContex
     case.decided_by = ctx.user_email or "ai_agent"
     case.execution_id = ctx.execution_id
     await ctx.session.flush()
-    return {"report_id": report["report_id"], "artifact": stored, "decision": args.decision,
-            "case_status": case.status}
+    return {
+        "report_id": report["report_id"],
+        "artifact": stored,
+        "decision": args.decision,
+        "case_status": case.status,
+    }

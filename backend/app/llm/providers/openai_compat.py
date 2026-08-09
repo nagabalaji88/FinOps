@@ -72,17 +72,13 @@ class OpenAICompatProvider(LLMProvider):
     def _chat_url(self, model: str) -> str:
         if self.azure_deployment_mode:
             return (
-                f"{self.base_url}/openai/deployments/{model}/chat/completions"
-                f"?api-version={self.api_version}"
+                f"{self.base_url}/openai/deployments/{model}/chat/completions?api-version={self.api_version}"
             )
         return f"{self.base_url}/chat/completions"
 
     def _embed_url(self, model: str) -> str:
         if self.azure_deployment_mode:
-            return (
-                f"{self.base_url}/openai/deployments/{model}/embeddings"
-                f"?api-version={self.api_version}"
-            )
+            return f"{self.base_url}/openai/deployments/{model}/embeddings?api-version={self.api_version}"
         return f"{self.base_url}/embeddings"
 
     def _require(self) -> None:
@@ -135,8 +131,9 @@ class OpenAICompatProvider(LLMProvider):
                 args = json.loads(fn.get("arguments") or "{}")
             except json.JSONDecodeError:
                 args = {"_raw": fn.get("arguments")}
-            calls.append(ToolCall(id=call.get("id") or str(uuid.uuid4()), name=fn.get("name", ""),
-                                  arguments=args))
+            calls.append(
+                ToolCall(id=call.get("id") or str(uuid.uuid4()), name=fn.get("name", ""), arguments=args)
+            )
         return calls
 
     async def chat(
@@ -153,13 +150,12 @@ class OpenAICompatProvider(LLMProvider):
         extra: dict[str, Any] | None = None,
     ) -> LLMResponse:
         self._require()
-        payload = self._payload(model, messages, tools, temperature, max_tokens, top_p, stop,
-                                json_mode, extra)
+        payload = self._payload(
+            model, messages, tools, temperature, max_tokens, top_p, stop, json_mode, extra
+        )
         started = time.perf_counter()
         try:
-            resp = await http_client().post(
-                self._chat_url(model), headers=self._headers(), json=payload
-            )
+            resp = await http_client().post(self._chat_url(model), headers=self._headers(), json=payload)
         except httpx.HTTPError as exc:
             raise ProviderError(f"{self.name} transport error: {exc}") from exc
         latency = (time.perf_counter() - started) * 1000
@@ -206,9 +202,17 @@ class OpenAICompatProvider(LLMProvider):
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         self._require()
-        payload = self._payload(model, messages, tools, temperature, max_tokens,
-                                kwargs.get("top_p"), kwargs.get("stop"),
-                                kwargs.get("json_mode", False), kwargs.get("extra"))
+        payload = self._payload(
+            model,
+            messages,
+            tools,
+            temperature,
+            max_tokens,
+            kwargs.get("top_p"),
+            kwargs.get("stop"),
+            kwargs.get("json_mode", False),
+            kwargs.get("extra"),
+        )
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}
         started = time.perf_counter()
@@ -223,8 +227,7 @@ class OpenAICompatProvider(LLMProvider):
         ) as resp:
             if resp.status_code >= 400:
                 body = (await resp.aread()).decode()[:1200]
-                raise ProviderError(f"{self.name} stream failed {resp.status_code}",
-                                    details={"body": body})
+                raise ProviderError(f"{self.name} stream failed {resp.status_code}", details={"body": body})
             request_id = resp.headers.get("x-request-id")
             async for line in resp.aiter_lines():
                 if not line or not line.startswith("data:"):
@@ -266,16 +269,20 @@ class OpenAICompatProvider(LLMProvider):
                 args = json.loads(buf["args"] or "{}")
             except json.JSONDecodeError:
                 args = {"_raw": buf["args"]}
-            tool_calls.append(ToolCall(id=buf["id"] or str(uuid.uuid4()), name=buf["name"],
-                                       arguments=args))
+            tool_calls.append(ToolCall(id=buf["id"] or str(uuid.uuid4()), name=buf["name"], arguments=args))
         if not usage.input_tokens:
             usage.input_tokens = sum(estimate_tokens(m.content or "") for m in messages)
         if not usage.output_tokens:
             usage.output_tokens = estimate_tokens(content)
         response = LLMResponse(
-            content=content, model=model, provider=self.name, usage=usage,
-            tool_calls=tool_calls, finish_reason=finish_reason,
-            latency_ms=(time.perf_counter() - started) * 1000, request_id=request_id,
+            content=content,
+            model=model,
+            provider=self.name,
+            usage=usage,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            latency_ms=(time.perf_counter() - started) * 1000,
+            request_id=request_id,
         )
         yield StreamChunk(done=True, response=response)
 
@@ -298,21 +305,24 @@ class OpenAICompatProvider(LLMProvider):
             model=data.get("model", model),
             provider=self.name,
             dimensions=len(vectors[0]) if vectors else 0,
-            usage=Usage(input_tokens=int(usage_raw.get("prompt_tokens", 0)
-                                         or sum(estimate_tokens(t) for t in texts))),
+            usage=Usage(
+                input_tokens=int(usage_raw.get("prompt_tokens", 0) or sum(estimate_tokens(t) for t in texts))
+            ),
             latency_ms=(time.perf_counter() - started) * 1000,
         )
 
     async def health(self) -> dict[str, Any]:
-        info: dict[str, Any] = {"provider": self.name, "configured": self.configured,
-                                "base_url": self.base_url}
+        info: dict[str, Any] = {
+            "provider": self.name,
+            "configured": self.configured,
+            "base_url": self.base_url,
+        }
         if not self.configured:
             info["status"] = "not_configured"
             return info
         try:
             started = time.perf_counter()
-            resp = await http_client().get(f"{self.base_url}/models", headers=self._headers(),
-                                           timeout=8.0)
+            resp = await http_client().get(f"{self.base_url}/models", headers=self._headers(), timeout=8.0)
             info["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
             info["status"] = "healthy" if resp.status_code < 400 else "degraded"
             info["http_status"] = resp.status_code
@@ -323,8 +333,7 @@ class OpenAICompatProvider(LLMProvider):
 
 
 def build_openai() -> OpenAICompatProvider:
-    return OpenAICompatProvider("openai", base_url=settings.openai_base_url,
-                                api_key=settings.openai_api_key)
+    return OpenAICompatProvider("openai", base_url=settings.openai_base_url, api_key=settings.openai_api_key)
 
 
 def build_azure_openai() -> OpenAICompatProvider:
@@ -339,18 +348,21 @@ def build_azure_openai() -> OpenAICompatProvider:
 
 
 def build_mistral() -> OpenAICompatProvider:
-    return OpenAICompatProvider("mistral", base_url=settings.mistral_base_url,
-                                api_key=settings.mistral_api_key)
+    return OpenAICompatProvider(
+        "mistral", base_url=settings.mistral_base_url, api_key=settings.mistral_api_key
+    )
 
 
 def build_deepseek() -> OpenAICompatProvider:
-    return OpenAICompatProvider("deepseek", base_url=settings.deepseek_base_url,
-                                api_key=settings.deepseek_api_key)
+    return OpenAICompatProvider(
+        "deepseek", base_url=settings.deepseek_base_url, api_key=settings.deepseek_api_key
+    )
 
 
 def build_together() -> OpenAICompatProvider:
-    return OpenAICompatProvider("together", base_url=settings.together_base_url,
-                                api_key=settings.together_api_key)
+    return OpenAICompatProvider(
+        "together", base_url=settings.together_base_url, api_key=settings.together_api_key
+    )
 
 
 def build_ollama() -> OpenAICompatProvider:

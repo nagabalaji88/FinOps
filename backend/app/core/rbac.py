@@ -10,7 +10,7 @@ class Permission(StrEnum):
     AGENT_EXECUTE = "agent:execute"
     AGENT_WRITE = "agent:write"
     AGENT_PUBLISH = "agent:publish"
-    AGENT_LIFECYCLE = "agent:lifecycle"          # pause / resume / disable
+    AGENT_LIFECYCLE = "agent:lifecycle"  # pause / resume / disable
     EXECUTION_READ = "execution:read"
     EXECUTION_CANCEL = "execution:cancel"
     TRACE_READ = "trace:read"

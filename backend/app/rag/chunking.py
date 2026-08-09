@@ -54,9 +54,7 @@ def chunk_text(
         if not body:
             continue
         if len(body) <= max_chars:
-            chunks.append(
-                TextChunk(index, body, heading, estimate_tokens(body), offset, offset + len(body))
-            )
+            chunks.append(TextChunk(index, body, heading, estimate_tokens(body), offset, offset + len(body)))
             index += 1
             continue
 
@@ -67,8 +65,14 @@ def chunk_text(
             candidate = f"{buffer} {sentence}".strip() if buffer else sentence
             if len(candidate) > max_chars and buffer:
                 chunks.append(
-                    TextChunk(index, buffer, heading, estimate_tokens(buffer), buffer_start,
-                              buffer_start + len(buffer))
+                    TextChunk(
+                        index,
+                        buffer,
+                        heading,
+                        estimate_tokens(buffer),
+                        buffer_start,
+                        buffer_start + len(buffer),
+                    )
                 )
                 index += 1
                 tail = buffer[-overlap_chars:] if overlap_chars else ""
@@ -78,13 +82,20 @@ def chunk_text(
                 buffer = candidate
         if buffer and estimate_tokens(buffer) >= min_tokens:
             chunks.append(
-                TextChunk(index, buffer, heading, estimate_tokens(buffer), buffer_start,
-                          buffer_start + len(buffer))
+                TextChunk(
+                    index, buffer, heading, estimate_tokens(buffer), buffer_start, buffer_start + len(buffer)
+                )
             )
             index += 1
         elif buffer and chunks:
             last = chunks[-1]
             merged = f"{last.content}\n{buffer}"
-            chunks[-1] = TextChunk(last.index, merged, last.heading, estimate_tokens(merged),
-                                   last.start_char, last.start_char + len(merged))
+            chunks[-1] = TextChunk(
+                last.index,
+                merged,
+                last.heading,
+                estimate_tokens(merged),
+                last.start_char,
+                last.start_char + len(merged),
+            )
     return chunks

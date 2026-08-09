@@ -54,8 +54,9 @@ def _serialise_scenario(scenario: Any) -> dict[str, Any]:
 
 
 @router.get("/scenarios")
-async def list_scenarios(principal: PrincipalDep, agent_key: str | None = None,
-                         tag: str | None = None) -> dict[str, Any]:
+async def list_scenarios(
+    principal: PrincipalDep, agent_key: str | None = None, tag: str | None = None
+) -> dict[str, Any]:
     principal.require(Permission.EVAL_READ)
     scenarios = list(SCENARIOS)
     if agent_key:
@@ -82,8 +83,9 @@ class RunRequest(BaseModel):
 
 
 @router.post("/run", status_code=status.HTTP_202_ACCEPTED)
-async def start_run(payload: RunRequest, request: Request, session: SessionDep,
-                    principal: PrincipalDep) -> dict[str, Any]:
+async def start_run(
+    payload: RunRequest, request: Request, session: SessionDep, principal: PrincipalDep
+) -> dict[str, Any]:
     """Start a conformance run in the background and return its identifier."""
     principal.require(Permission.EVAL_RUN)
 
@@ -96,8 +98,9 @@ async def start_run(payload: RunRequest, request: Request, session: SessionDep,
     if payload.tag:
         selected = [s for s in selected if payload.tag in s.tags]
     if not selected:
-        raise ValidationError("No scenarios matched the filters",
-                              details={"available": [s.id for s in SCENARIOS]})
+        raise ValidationError(
+            "No scenarios matched the filters", details={"available": [s.id for s in SCENARIOS]}
+        )
 
     run_id = uuid.uuid4().hex[:12]
     validation_runner = ValidationRunner(
@@ -151,9 +154,15 @@ async def start_run(payload: RunRequest, request: Request, session: SessionDep,
                 )
 
     asyncio.create_task(execute())
-    await write_audit(session, principal=principal, action="validation.run.started",
-                      resource_type="validation_run", resource_id=run_id,
-                      details={"scenarios": len(selected)}, request=request)
+    await write_audit(
+        session,
+        principal=principal,
+        action="validation.run.started",
+        resource_type="validation_run",
+        resource_id=run_id,
+        details={"scenarios": len(selected)},
+        request=request,
+    )
     return {
         "run_id": run_id,
         "status": "running",
@@ -182,8 +191,7 @@ async def list_runs(principal: PrincipalDep) -> list[dict[str, Any]]:
 
 
 @router.get("/runs/{run_id}")
-async def get_run(run_id: str, principal: PrincipalDep,
-                  include_markdown: bool = False) -> dict[str, Any]:
+async def get_run(run_id: str, principal: PrincipalDep, include_markdown: bool = False) -> dict[str, Any]:
     principal.require(Permission.EVAL_READ)
     run = _RUNS.get(run_id)
     if run is None:

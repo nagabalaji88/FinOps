@@ -32,18 +32,14 @@ class KnowledgeSource(Base, UUIDMixin, TimestampMixin):
     classification: Mapped[str] = mapped_column(String(40), default="internal")
     sync_interval_minutes: Mapped[int] = mapped_column(Integer, default=60)
 
-    documents: Mapped[list[Document]] = relationship(
-        back_populates="source", cascade="all, delete-orphan"
-    )
+    documents: Mapped[list[Document]] = relationship(back_populates="source", cascade="all, delete-orphan")
 
 
 class Document(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "documents"
     __table_args__ = (Index("ix_doc_source_ext", "source_id", "external_id"),)
 
-    source_id: Mapped[str] = mapped_column(
-        ForeignKey("knowledge_sources.id", ondelete="CASCADE"), index=True
-    )
+    source_id: Mapped[str] = mapped_column(ForeignKey("knowledge_sources.id", ondelete="CASCADE"), index=True)
     external_id: Mapped[str | None] = mapped_column(String(255), default=None)
     title: Mapped[str] = mapped_column(String(500))
     uri: Mapped[str | None] = mapped_column(String(1000), default=None)
@@ -120,9 +116,7 @@ class MemoryThread(Base, UUIDMixin, TimestampMixin):
 class MemoryMessage(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "memory_messages"
 
-    thread_id: Mapped[str] = mapped_column(
-        ForeignKey("memory_threads.id", ondelete="CASCADE"), index=True
-    )
+    thread_id: Mapped[str] = mapped_column(ForeignKey("memory_threads.id", ondelete="CASCADE"), index=True)
     role: Mapped[str] = mapped_column(String(24))  # user|assistant|tool|system
     content: Mapped[str] = mapped_column(Text)
     execution_id: Mapped[str | None] = mapped_column(String(36), default=None)

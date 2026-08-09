@@ -72,8 +72,11 @@ async def authenticate_customer(args: AuthenticateArgs, ctx: ToolContext) -> dic
     if customer is None:
         raise NotFoundError("No customer found for that identifier")
     if customer.failed_auth_attempts >= MAX_AUTH_ATTEMPTS:
-        return {"authenticated": False, "reason": "locked",
-                "message": "Account is locked after repeated failed attempts. Escalate to a human."}
+        return {
+            "authenticated": False,
+            "reason": "locked",
+            "message": "Account is locked after repeated failed attempts. Escalate to a human.",
+        }
 
     verified = False
     method = None
@@ -81,8 +84,7 @@ async def authenticate_customer(args: AuthenticateArgs, ctx: ToolContext) -> dic
         verified = verify_password(args.pin, customer.auth_pin_hash)
         method = "pin"
     if not verified and args.security_answer and customer.security_answer_hash:
-        verified = verify_password(args.security_answer.strip().lower(),
-                                   customer.security_answer_hash)
+        verified = verify_password(args.security_answer.strip().lower(), customer.security_answer_hash)
         method = "security_question"
 
     if not verified:
@@ -124,8 +126,8 @@ class LookupArgs(BaseModel):
 async def lookup_customer_accounts(args: LookupArgs, ctx: ToolContext) -> dict[str, Any]:
     customer_id = _require_auth(ctx, args.customer_id)
     accounts = (
-        await ctx.session.execute(select(Account).where(Account.customer_id == customer_id))
-    ).scalars().all()
+        (await ctx.session.execute(select(Account).where(Account.customer_id == customer_id))).scalars().all()
+    )
     return {
         "count": len(accounts),
         "accounts": [
@@ -209,9 +211,7 @@ async def get_recent_transactions(args: TransactionArgs, ctx: ToolContext) -> di
         stmt = stmt.where(func.abs(Transaction.amount) >= args.min_amount)
     if args.search:
         pattern = f"%{args.search}%"
-        stmt = stmt.where(
-            or_(Transaction.merchant.ilike(pattern), Transaction.description.ilike(pattern))
-        )
+        stmt = stmt.where(or_(Transaction.merchant.ilike(pattern), Transaction.description.ilike(pattern)))
     rows = (await ctx.session.execute(stmt)).scalars().all()
     return {
         "count": len(rows),
@@ -346,11 +346,17 @@ async def create_support_ticket(args: TicketArgs, ctx: ToolContext) -> dict[str,
         sentiment=args.sentiment,
         channel="ai_agent",
         execution_id=ctx.execution_id,
-        assigned_team={"card": "Cards Servicing", "loan": "Retail Lending",
-                       "fraud": "Fraud Operations"}.get(args.category, "Customer Care"),
+        assigned_team={"card": "Cards Servicing", "loan": "Retail Lending", "fraud": "Fraud Operations"}.get(
+            args.category, "Customer Care"
+        ),
         sla_due_at=datetime.now(UTC) + timedelta(hours=sla_hours),
-        notes=[{"at": datetime.now(UTC).isoformat(), "by": "ai_agent",
-                "note": "Ticket raised by AI customer service agent"}],
+        notes=[
+            {
+                "at": datetime.now(UTC).isoformat(),
+                "by": "ai_agent",
+                "note": "Ticket raised by AI customer service agent",
+            }
+        ],
     )
     ctx.session.add(ticket)
     await ctx.session.flush()
@@ -385,9 +391,7 @@ async def escalate_to_human(args: EscalateArgs, ctx: ToolContext) -> dict[str, A
     ticket: Ticket | None = None
     if args.ticket_number:
         ticket = (
-            await ctx.session.execute(
-                select(Ticket).where(Ticket.ticket_number == args.ticket_number)
-            )
+            await ctx.session.execute(select(Ticket).where(Ticket.ticket_number == args.ticket_number))
         ).scalar_one_or_none()
     if ticket is None:
         ticket = Ticket(
@@ -404,12 +408,21 @@ async def escalate_to_human(args: EscalateArgs, ctx: ToolContext) -> dict[str, A
     ticket.escalation_reason = args.reason
     ticket.assigned_team = "Tier 2 Specialist Desk"
     ticket.status = "escalated"
-    ticket.notes = [*(ticket.notes or []),
-                    {"at": datetime.now(UTC).isoformat(), "by": ctx.user_email or "ai_agent",
-                     "note": f"Escalated ({args.urgency}): {args.reason}"}]
+    ticket.notes = [
+        *(ticket.notes or []),
+        {
+            "at": datetime.now(UTC).isoformat(),
+            "by": ctx.user_email or "ai_agent",
+            "note": f"Escalated ({args.urgency}): {args.reason}",
+        },
+    ]
     await ctx.session.flush()
-    return {"escalated": True, "ticket_number": ticket.ticket_number,
-            "assigned_team": ticket.assigned_team, "urgency": args.urgency}
+    return {
+        "escalated": True,
+        "ticket_number": ticket.ticket_number,
+        "assigned_team": ticket.assigned_team,
+        "urgency": args.urgency,
+    }
 
 
 class FaqArgs(BaseModel):
@@ -444,8 +457,13 @@ async def search_faq(args: FaqArgs, ctx: ToolContext) -> dict[str, Any]:
     return {
         "count": len(top),
         "results": [
-            {"question": e.question, "answer": e.answer, "category": e.category,
-             "product": e.product, "score": round(s, 4)}
+            {
+                "question": e.question,
+                "answer": e.answer,
+                "category": e.category,
+                "product": e.product,
+                "score": round(s, 4),
+            }
             for s, e in top
         ],
     }
@@ -455,13 +473,55 @@ class SentimentArgs(BaseModel):
     text: str
 
 
-NEGATIVE = {"angry", "furious", "terrible", "worst", "unacceptable", "fraud", "scam", "cheated",
-            "disgusted", "frustrated", "annoyed", "complaint", "useless", "horrible", "stuck",
-            "delay", "failed", "wrong", "ridiculous", "escalate", "sue", "ombudsman"}
-POSITIVE = {"thanks", "thank", "great", "excellent", "helpful", "appreciate", "good", "resolved",
-            "happy", "perfect", "wonderful", "quick"}
-URGENT = {"urgent", "immediately", "asap", "emergency", "blocked", "stolen", "unauthorised",
-          "unauthorized", "lost"}
+NEGATIVE = {
+    "angry",
+    "furious",
+    "terrible",
+    "worst",
+    "unacceptable",
+    "fraud",
+    "scam",
+    "cheated",
+    "disgusted",
+    "frustrated",
+    "annoyed",
+    "complaint",
+    "useless",
+    "horrible",
+    "stuck",
+    "delay",
+    "failed",
+    "wrong",
+    "ridiculous",
+    "escalate",
+    "sue",
+    "ombudsman",
+}
+POSITIVE = {
+    "thanks",
+    "thank",
+    "great",
+    "excellent",
+    "helpful",
+    "appreciate",
+    "good",
+    "resolved",
+    "happy",
+    "perfect",
+    "wonderful",
+    "quick",
+}
+URGENT = {
+    "urgent",
+    "immediately",
+    "asap",
+    "emergency",
+    "blocked",
+    "stolen",
+    "unauthorised",
+    "unauthorized",
+    "lost",
+}
 
 
 @tool(
@@ -486,8 +546,13 @@ async def detect_sentiment(args: SentimentArgs, ctx: ToolContext) -> dict[str, A
         "label": label,
         "score": round(max(min(score, 1.0), -1.0), 3),
         "urgency": urgency,
-        "signals": {"negative_terms": neg, "positive_terms": pos, "urgent_terms": urgent,
-                    "exclamations": exclamations, "caps_ratio": round(caps_ratio, 3)},
+        "signals": {
+            "negative_terms": neg,
+            "positive_terms": pos,
+            "urgent_terms": urgent,
+            "exclamations": exclamations,
+            "caps_ratio": round(caps_ratio, 3),
+        },
         "escalation_recommended": urgency == "high",
     }
     ctx.state["sentiment"] = result

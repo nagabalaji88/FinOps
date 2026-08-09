@@ -38,9 +38,7 @@ def _to_contents(messages: list[Message]) -> tuple[str | None, list[dict[str, An
             parts: list[dict[str, Any]] = []
             if m.content:
                 parts.append({"text": m.content})
-            parts.extend(
-                {"functionCall": {"name": tc.name, "args": tc.arguments}} for tc in m.tool_calls
-            )
+            parts.extend({"functionCall": {"name": tc.name, "args": tc.arguments}} for tc in m.tool_calls)
             contents.append({"role": "model", "parts": parts or [{"text": ""}]})
         else:
             contents.append({"role": "user", "parts": [{"text": m.content}]})
@@ -103,15 +101,18 @@ class GoogleProvider(LLMProvider):
         started = time.perf_counter()
         try:
             resp = await http_client().post(
-                url, params={"key": settings.google_api_key},
-                headers={"Content-Type": "application/json"}, json=payload,
+                url,
+                params={"key": settings.google_api_key},
+                headers={"Content-Type": "application/json"},
+                json=payload,
             )
         except httpx.HTTPError as exc:
             raise ProviderError(f"Gemini transport error: {exc}") from exc
         latency = (time.perf_counter() - started) * 1000
         if resp.status_code >= 400:
-            raise ProviderError(f"Gemini returned {resp.status_code}",
-                                details={"body": resp.text[:1200], "model": model})
+            raise ProviderError(
+                f"Gemini returned {resp.status_code}", details={"body": resp.text[:1200], "model": model}
+            )
         data = resp.json()
         candidate = (data.get("candidates") or [{}])[0]
         text_parts: list[str] = []
@@ -121,19 +122,25 @@ class GoogleProvider(LLMProvider):
                 text_parts.append(part["text"])
             if "functionCall" in part:
                 fc = part["functionCall"]
-                tool_calls.append(ToolCall(id=str(uuid.uuid4()), name=fc.get("name", ""),
-                                           arguments=fc.get("args") or {}))
+                tool_calls.append(
+                    ToolCall(id=str(uuid.uuid4()), name=fc.get("name", ""), arguments=fc.get("args") or {})
+                )
         usage_raw = data.get("usageMetadata") or {}
         content = "".join(text_parts)
         usage = Usage(
-            input_tokens=int(usage_raw.get("promptTokenCount", 0)) or
-            sum(estimate_tokens(m.content or "") for m in messages),
+            input_tokens=int(usage_raw.get("promptTokenCount", 0))
+            or sum(estimate_tokens(m.content or "") for m in messages),
             output_tokens=int(usage_raw.get("candidatesTokenCount", 0)) or estimate_tokens(content),
             cached_input_tokens=int(usage_raw.get("cachedContentTokenCount", 0)),
         )
         return LLMResponse(
-            content=content, model=model, provider=self.name, usage=usage, tool_calls=tool_calls,
-            finish_reason=(candidate.get("finishReason") or "STOP").lower(), latency_ms=latency,
+            content=content,
+            model=model,
+            provider=self.name,
+            usage=usage,
+            tool_calls=tool_calls,
+            finish_reason=(candidate.get("finishReason") or "STOP").lower(),
+            latency_ms=latency,
         )
 
     async def embed(self, *, model: str, texts: list[str]) -> EmbeddingResult:
@@ -141,18 +148,19 @@ class GoogleProvider(LLMProvider):
         started = time.perf_counter()
         url = f"{settings.google_base_url}/models/{model}:batchEmbedContents"
         payload = {
-            "requests": [
-                {"model": f"models/{model}", "content": {"parts": [{"text": t}]}} for t in texts
-            ]
+            "requests": [{"model": f"models/{model}", "content": {"parts": [{"text": t}]}} for t in texts]
         }
         resp = await http_client().post(url, params={"key": settings.google_api_key}, json=payload)
         if resp.status_code >= 400:
-            raise ProviderError(f"Gemini embedding failed {resp.status_code}",
-                                details={"body": resp.text[:800]})
+            raise ProviderError(
+                f"Gemini embedding failed {resp.status_code}", details={"body": resp.text[:800]}
+            )
         data = resp.json()
         vectors = [e["values"] for e in data.get("embeddings", [])]
         return EmbeddingResult(
-            vectors=vectors, model=model, provider=self.name,
+            vectors=vectors,
+            model=model,
+            provider=self.name,
             dimensions=len(vectors[0]) if vectors else 0,
             usage=Usage(input_tokens=sum(estimate_tokens(t) for t in texts)),
             latency_ms=(time.perf_counter() - started) * 1000,
@@ -165,8 +173,9 @@ class GoogleProvider(LLMProvider):
             return info
         try:
             started = time.perf_counter()
-            resp = await http_client().get(f"{settings.google_base_url}/models",
-                                           params={"key": settings.google_api_key}, timeout=8.0)
+            resp = await http_client().get(
+                f"{settings.google_base_url}/models", params={"key": settings.google_api_key}, timeout=8.0
+            )
             info["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
             info["status"] = "healthy" if resp.status_code < 400 else "degraded"
             info["http_status"] = resp.status_code

@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     # the form every deployment writes — fails at import with an opaque SettingsError.
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: [
-            "http://localhost:5173",   # platform console (dev)
-            "http://localhost:5174",   # execute console (dev)
+            "http://localhost:5173",  # platform console (dev)
+            "http://localhost:5174",  # execute console (dev)
             "http://localhost:4173",
             "http://localhost:4174",
         ]
@@ -143,7 +143,7 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
 
     # --- External data / tool APIs -----------------------------------------
-    market_data_api_key: str | None = None            # Alpha Vantage compatible
+    market_data_api_key: str | None = None  # Alpha Vantage compatible
     market_data_base_url: str = "https://www.alphavantage.co"
     news_api_key: str | None = None
     news_base_url: str = "https://newsapi.org/v2"
@@ -208,10 +208,7 @@ class Settings(BaseSettings):
 
     @property
     def sync_database_url(self) -> str:
-        return (
-            self.database_url.replace("+asyncpg", "+psycopg2")
-            .replace("+aiosqlite", "")
-        )
+        return self.database_url.replace("+asyncpg", "+psycopg2").replace("+aiosqlite", "")
 
 
 @functools.lru_cache

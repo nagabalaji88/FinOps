@@ -32,9 +32,9 @@ jobs:
       - name: Ruff
         run: ruff check app tests
       - name: Ruff format check
-        run: ruff format --check app || true
+        run: ruff format --check app tests
       - name: Mypy
-        run: mypy app --ignore-missing-imports --no-strict-optional || true
+        run: mypy app --ignore-missing-imports --no-strict-optional
 
   backend-test:
     name: Backend tests
@@ -142,10 +142,17 @@ jobs:
         with:
           sarif_file: trivy.sarif
       - name: Python dependency audit
+        # The previous form fed a JSON install report to `-r`, which expects a requirements
+        # file, and then swallowed the result twice over. This installs the dependency set
+        # the image actually ships and fails the build on an advisory.
         run: |
-          pip install pip-audit
-          pip-audit -r <(pip install --dry-run --report - ./backend 2>/dev/null || echo "") || true
-        continue-on-error: true
+          python -m pip install --upgrade pip setuptools wheel pip-audit
+          pip install ./backend
+          # PYSEC-2026-1325 (ecdsa, Minerva timing attack on P-256) has no upstream fix.
+          # `ecdsa` is present only as python-jose's pure-Python fallback backend: this
+          # platform signs with HS256 through the `cryptography` backend and no code path
+          # reaches it. Reviewed 2026-08-09; drop this once python-jose releases without it.
+          pip-audit --strict --desc --ignore-vuln PYSEC-2026-1325
 
   images:
     name: Build container images

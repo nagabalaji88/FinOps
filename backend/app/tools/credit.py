@@ -53,6 +53,10 @@ OFFSET = BASE_SCORE - FACTOR * math.log(BASE_ODDS)
 
 #: Weight of evidence coefficients, one per characteristic. Positive points reduce risk.
 #: Each band is (inclusive_lower, exclusive_upper, points).
+# fmt: off
+# The scorecard is read as a table: each band is (lower, upper, points), and keeping the
+# bands on one line per row is what lets a reviewer check the cutoffs against the policy
+# document. One value per line would make that impossible.
 SCORECARD: dict[str, dict[str, Any]] = {
     "bureau_score": {
         "label": "Bureau score",
@@ -97,10 +101,17 @@ SCORECARD: dict[str, dict[str, Any]] = {
         "missing_points": 0,
     },
 }
+# fmt: on
 
 #: Segment adjustments applied after the scorecard, in points.
-EMPLOYMENT_ADJUSTMENT = {"salaried": 10, "self_employed": -10, "professional": 5,
-                        "business": -5, "retired": -15, "student": -30}
+EMPLOYMENT_ADJUSTMENT = {
+    "salaried": 10,
+    "self_employed": -10,
+    "professional": 5,
+    "business": -5,
+    "retired": -15,
+    "student": -30,
+}
 
 #: Basel III IRB, retail "other" exposures.
 IRB_CORRELATION_MIN = 0.03
@@ -113,12 +124,17 @@ IRB_CAPITAL_MULTIPLIER = 12.5
 LGD_UNSECURED = 0.45
 LGD_FLOOR = 0.05
 COLLATERAL_HAIRCUT = {
-    "property": 0.25, "residential_property": 0.20, "commercial_property": 0.35,
-    "gold": 0.10, "fixed_deposit": 0.02, "vehicle": 0.40, "securities": 0.25,
+    "property": 0.25,
+    "residential_property": 0.20,
+    "commercial_property": 0.35,
+    "gold": 0.10,
+    "fixed_deposit": 0.02,
+    "vehicle": 0.40,
+    "securities": 0.25,
 }
 
 #: Pricing build-up, annualised percentages.
-COST_OF_FUNDS_PCT = 6.85          # marginal cost of funds based lending rate reference
+COST_OF_FUNDS_PCT = 6.85  # marginal cost of funds based lending rate reference
 OPERATING_COST_PCT = 1.40
 TARGET_RETURN_ON_CAPITAL = 0.15
 MIN_RATE_PCT = 8.50
@@ -130,8 +146,14 @@ MAX_AGE_AT_MATURITY = 70
 MIN_BUREAU_SCORE = 620
 MAX_FOIR_PCT = 60.0
 MAX_UNSECURED_EXPOSURE = 5_000_000.0
-MAX_TENURE_MONTHS = {"personal_loan": 84, "auto_loan": 84, "home_loan": 360,
-                     "business_loan": 120, "credit_card": 0, "gold_loan": 36}
+MAX_TENURE_MONTHS = {
+    "personal_loan": 84,
+    "auto_loan": 84,
+    "home_loan": 360,
+    "business_loan": 120,
+    "credit_card": 0,
+    "gold_loan": 36,
+}
 
 _NORMAL = NormalDist()
 
@@ -170,7 +192,7 @@ def basel_irb_capital(pd: float, lgd: float, exposure: float) -> dict[str, float
     K = LGD * [ N( (N^-1(PD) + sqrt(R) * N^-1(0.999)) / sqrt(1-R) ) - PD ]
     R = 0.03 * (1-e^-35PD)/(1-e^-35) + 0.16 * [1 - (1-e^-35PD)/(1-e^-35)]
     """
-    pd = min(max(pd, 0.0003), 0.9999)   # the 0.03% regulatory PD floor
+    pd = min(max(pd, 0.0003), 0.9999)  # the 0.03% regulatory PD floor
     decay = (1 - math.exp(-IRB_K_FACTOR * pd)) / (1 - math.exp(-IRB_K_FACTOR))
     correlation = IRB_CORRELATION_MIN * decay + IRB_CORRELATION_MAX * (1 - decay)
     conditional = _NORMAL.cdf(
@@ -191,8 +213,16 @@ def basel_irb_capital(pd: float, lgd: float, exposure: float) -> dict[str, float
 
 def grade_for_pd(pd: float) -> str:
     """Master rating scale. Boundaries are the midpoints of the usual PD bands."""
-    for grade, ceiling in (("AAA", 0.0010), ("AA", 0.0025), ("A", 0.0060), ("BBB", 0.0150),
-                           ("BB", 0.0400), ("B", 0.0900), ("CCC", 0.1800), ("CC", 0.3000)):
+    for grade, ceiling in (
+        ("AAA", 0.0010),
+        ("AA", 0.0025),
+        ("A", 0.0060),
+        ("BBB", 0.0150),
+        ("BB", 0.0400),
+        ("B", 0.0900),
+        ("CCC", 0.1800),
+        ("CC", 0.3000),
+    ):
         if pd <= ceiling:
             return grade
     return "C"
@@ -230,19 +260,34 @@ class ApplicationArgs(BaseModel):
     application: str = Field(description="Application number or id")
 
 
-@tool("get_credit_application",
-      "Fetch a credit application with the applicant's profile and existing exposure.",
-      ApplicationArgs, category="credit")
+@tool(
+    "get_credit_application",
+    "Fetch a credit application with the applicant's profile and existing exposure.",
+    ApplicationArgs,
+    category="credit",
+)
 async def get_credit_application(args: ApplicationArgs, ctx: ToolContext) -> dict[str, Any]:
     application = await _application(ctx, args.application)
     customer = await _customer(ctx, application.customer_id)
 
-    loans = (await ctx.session.execute(
-        select(Loan).where(Loan.customer_id == customer.id, Loan.status == "active")
-    )).scalars().all()
-    cards = (await ctx.session.execute(
-        select(Card).where(Card.customer_id == customer.id, Card.status == "active")
-    )).scalars().all()
+    loans = (
+        (
+            await ctx.session.execute(
+                select(Loan).where(Loan.customer_id == customer.id, Loan.status == "active")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    cards = (
+        (
+            await ctx.session.execute(
+                select(Card).where(Card.customer_id == customer.id, Card.status == "active")
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     existing_emi = round(sum(loan.emi_amount for loan in loans), 2)
     card_minimums = round(sum(card.minimum_due for card in cards), 2)
@@ -262,8 +307,7 @@ async def get_credit_application(args: ApplicationArgs, ctx: ToolContext) -> dic
             "employment_months": application.employment_months,
             "collateral_type": application.collateral_type,
             "collateral_value": application.collateral_value,
-            "submitted_at": application.submitted_at.isoformat()
-            if application.submitted_at else None,
+            "submitted_at": application.submitted_at.isoformat() if application.submitted_at else None,
         },
         "applicant": {
             "customer_number": customer.customer_number,
@@ -272,8 +316,7 @@ async def get_credit_application(args: ApplicationArgs, ctx: ToolContext) -> dic
             "segment": customer.segment,
             "kyc_status": customer.kyc_status,
             "risk_rating": customer.risk_rating,
-            "relationship_since": customer.onboarded_at.date().isoformat()
-            if customer.onboarded_at else None,
+            "relationship_since": customer.onboarded_at.date().isoformat() if customer.onboarded_at else None,
         },
         "existing_exposure": {
             "active_loans": len(loans),
@@ -291,23 +334,31 @@ async def get_credit_application(args: ApplicationArgs, ctx: ToolContext) -> dic
 class BureauArgs(BaseModel):
     customer_id: str = Field(description="Customer id")
     bureau: str = Field(default="CIBIL", description="Bureau to read")
-    max_age_days: int = Field(default=30, ge=1, le=365,
-                              description="Reject a pull older than this")
+    max_age_days: int = Field(default=30, ge=1, le=365, description="Reject a pull older than this")
 
 
-@tool("pull_credit_bureau",
-      "Read the most recent credit bureau record for the applicant.",
-      BureauArgs, category="credit")
+@tool(
+    "pull_credit_bureau",
+    "Read the most recent credit bureau record for the applicant.",
+    BureauArgs,
+    category="credit",
+)
 async def pull_credit_bureau(args: BureauArgs, ctx: ToolContext) -> dict[str, Any]:
-    record = (await ctx.session.execute(
-        select(BureauRecord)
-        .where(BureauRecord.customer_id == args.customer_id, BureauRecord.bureau == args.bureau)
-        .order_by(BureauRecord.pulled_at.desc()).limit(1)
-    )).scalar_one_or_none()
+    record = (
+        await ctx.session.execute(
+            select(BureauRecord)
+            .where(BureauRecord.customer_id == args.customer_id, BureauRecord.bureau == args.bureau)
+            .order_by(BureauRecord.pulled_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     if record is None:
-        return {"available": False, "bureau": args.bureau,
-                "reason": "no bureau record on file for this customer",
-                "action": "a fresh pull is required before a decision can be made"}
+        return {
+            "available": False,
+            "bureau": args.bureau,
+            "reason": "no bureau record on file for this customer",
+            "action": "a fresh pull is required before a decision can be made",
+        }
 
     pulled_at = record.pulled_at
     if pulled_at.tzinfo is None:
@@ -340,17 +391,24 @@ async def pull_credit_bureau(args: BureauArgs, ctx: ToolContext) -> dict[str, An
 
 class AffordabilityArgs(BaseModel):
     application: str = Field(description="Application number or id")
-    proposed_rate_pct: float = Field(default=0.0, ge=0, le=60,
-                                     description="Rate to price the instalment at; 0 uses the "
-                                                 "indicative product rate")
+    proposed_rate_pct: float = Field(
+        default=0.0,
+        ge=0,
+        le=60,
+        description="Rate to price the instalment at; 0 uses the indicative product rate",
+    )
     verify_income_from_ledger: bool = Field(
-        default=True, description="Cross-check declared income against salary credits")
+        default=True, description="Cross-check declared income against salary credits"
+    )
 
 
-@tool("assess_affordability",
-      "Compute FOIR and disposable income for the requested facility, verifying declared "
-      "income against the customer's own salary credits.",
-      AffordabilityArgs, category="credit")
+@tool(
+    "assess_affordability",
+    "Compute FOIR and disposable income for the requested facility, verifying declared "
+    "income against the customer's own salary credits.",
+    AffordabilityArgs,
+    category="credit",
+)
 async def assess_affordability(args: AffordabilityArgs, ctx: ToolContext) -> dict[str, Any]:
     application = await _application(ctx, args.application)
     customer = await _customer(ctx, application.customer_id)
@@ -360,26 +418,42 @@ async def assess_affordability(args: AffordabilityArgs, ctx: ToolContext) -> dic
     if args.verify_income_from_ledger:
         since = datetime.now(UTC) - timedelta(days=180)
         account_ids = [
-            row for row in (await ctx.session.execute(
-                select(Account.id).where(Account.customer_id == customer.id)
-            )).scalars().all()
+            row
+            for row in (
+                await ctx.session.execute(select(Account.id).where(Account.customer_id == customer.id))
+            )
+            .scalars()
+            .all()
         ]
         if account_ids:
-            credits = (await ctx.session.execute(
-                select(Transaction).where(
-                    Transaction.account_id.in_(account_ids),
-                    Transaction.booked_at >= since,
-                    Transaction.direction == "credit",
+            credits = (
+                (
+                    await ctx.session.execute(
+                        select(Transaction).where(
+                            Transaction.account_id.in_(account_ids),
+                            Transaction.booked_at >= since,
+                            Transaction.direction == "credit",
+                        )
+                    )
                 )
-            )).scalars().all()
-            salary = [t for t in credits
-                      if (t.category or "").lower() in {"salary", "income"}
-                      or "salary" in (t.description or "").lower()]
+                .scalars()
+                .all()
+            )
+            salary = [
+                t
+                for t in credits
+                if (t.category or "").lower() in {"salary", "income"}
+                or "salary" in (t.description or "").lower()
+            ]
             if salary:
                 months = max(1, len({(t.booked_at.year, t.booked_at.month) for t in salary}))
                 verified_income = round(sum(abs(t.amount) for t in salary) / months, 2)
-                evidence = {"method": "salary_credits", "credits_found": len(salary),
-                            "months_observed": months, "window_days": 180}
+                evidence = {
+                    "method": "salary_credits",
+                    "credits_found": len(salary),
+                    "months_observed": months,
+                    "window_days": 180,
+                }
             else:
                 evidence = {"method": "declared", "reason": "no salary credits identified"}
         else:
@@ -390,14 +464,27 @@ async def assess_affordability(args: AffordabilityArgs, ctx: ToolContext) -> dic
     if income <= 0:
         raise ValidationError("No income available: neither declared nor verifiable")
 
-    loans = (await ctx.session.execute(
-        select(Loan).where(Loan.customer_id == customer.id, Loan.status == "active")
-    )).scalars().all()
-    cards = (await ctx.session.execute(
-        select(Card).where(Card.customer_id == customer.id, Card.status == "active")
-    )).scalars().all()
+    loans = (
+        (
+            await ctx.session.execute(
+                select(Loan).where(Loan.customer_id == customer.id, Loan.status == "active")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    cards = (
+        (
+            await ctx.session.execute(
+                select(Card).where(Card.customer_id == customer.id, Card.status == "active")
+            )
+        )
+        .scalars()
+        .all()
+    )
     existing_obligations = round(
-        sum(loan.emi_amount for loan in loans) + sum(card.minimum_due for card in cards), 2)
+        sum(loan.emi_amount for loan in loans) + sum(card.minimum_due for card in cards), 2
+    )
 
     rate = args.proposed_rate_pct or _indicative_rate(application.product)
     proposed_emi = emi(application.requested_amount, rate, application.tenure_months)
@@ -414,7 +501,8 @@ async def assess_affordability(args: AffordabilityArgs, ctx: ToolContext) -> dic
             "verified_monthly": verified_income,
             "used_for_assessment": round(income, 2),
             "variance_pct": round((declared - verified_income) / verified_income * 100, 2)
-            if verified_income else None,
+            if verified_income
+            else None,
             "evidence": evidence,
         },
         "obligations": {
@@ -428,14 +516,19 @@ async def assess_affordability(args: AffordabilityArgs, ctx: ToolContext) -> dic
         "within_cap": foir <= MAX_FOIR_PCT,
         "disposable_income": round(disposable, 2),
         "max_affordable_emi": round(headroom, 2),
-        "max_affordable_principal": round(
-            _principal_for_emi(headroom, rate, application.tenure_months), 2),
+        "max_affordable_principal": round(_principal_for_emi(headroom, rate, application.tenure_months), 2),
     }
 
 
 def _indicative_rate(product: str) -> float:
-    return {"personal_loan": 14.5, "auto_loan": 9.75, "home_loan": 8.65,
-            "business_loan": 15.5, "gold_loan": 11.0, "credit_card": 36.0}.get(product, 14.5)
+    return {
+        "personal_loan": 14.5,
+        "auto_loan": 9.75,
+        "home_loan": 8.65,
+        "business_loan": 15.5,
+        "gold_loan": 11.0,
+        "credit_card": 36.0,
+    }.get(product, 14.5)
 
 
 def _principal_for_emi(instalment: float, annual_rate_pct: float, months: int) -> float:
@@ -451,20 +544,28 @@ def _principal_for_emi(instalment: float, annual_rate_pct: float, months: int) -
 
 class ScoreArgs(BaseModel):
     application: str = Field(description="Application number or id")
-    foir_pct: float | None = Field(default=None,
-                                   description="FOIR from assess_affordability; omit to skip "
-                                               "the affordability characteristic")
+    foir_pct: float | None = Field(
+        default=None,
+        description="FOIR from assess_affordability; omit to skip the affordability characteristic",
+    )
 
 
-@tool("score_credit_risk",
-      "Run the origination scorecard and convert the score to a probability of default.",
-      ScoreArgs, category="credit")
+@tool(
+    "score_credit_risk",
+    "Run the origination scorecard and convert the score to a probability of default.",
+    ScoreArgs,
+    category="credit",
+)
 async def score_credit_risk(args: ScoreArgs, ctx: ToolContext) -> dict[str, Any]:
     application = await _application(ctx, args.application)
-    bureau = (await ctx.session.execute(
-        select(BureauRecord).where(BureauRecord.customer_id == application.customer_id)
-        .order_by(BureauRecord.pulled_at.desc()).limit(1)
-    )).scalar_one_or_none()
+    bureau = (
+        await ctx.session.execute(
+            select(BureauRecord)
+            .where(BureauRecord.customer_id == application.customer_id)
+            .order_by(BureauRecord.pulled_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
     values: dict[str, float | None] = {
         "bureau_score": float(bureau.score) if bureau else None,
@@ -482,32 +583,43 @@ async def score_credit_risk(args: ScoreArgs, ctx: ToolContext) -> dict[str, Any]
     for characteristic, value in values.items():
         points, band = _band_points(characteristic, value)
         total_points += points
-        contributions.append({
-            "characteristic": characteristic,
-            "label": SCORECARD[characteristic]["label"],
-            "value": value,
-            "band": band,
-            "points": points,
-        })
+        contributions.append(
+            {
+                "characteristic": characteristic,
+                "label": SCORECARD[characteristic]["label"],
+                "value": value,
+                "band": band,
+                "points": points,
+            }
+        )
 
     adjustment = EMPLOYMENT_ADJUSTMENT.get(application.employment_type, 0)
-    contributions.append({"characteristic": "employment_type", "label": "Employment type",
-                          "value": application.employment_type, "band": "segment",
-                          "points": float(adjustment)})
+    contributions.append(
+        {
+            "characteristic": "employment_type",
+            "label": "Employment type",
+            "value": application.employment_type,
+            "band": "segment",
+            "points": float(adjustment),
+        }
+    )
 
     score = BASE_SCORE + total_points + adjustment
     pd = score_to_pd(score)
     return {
         "score": round(score, 1),
         "base_score": BASE_SCORE,
-        "scaling": {"base_odds": BASE_ODDS, "points_to_double_odds": PDO,
-                    "factor": round(FACTOR, 4), "offset": round(OFFSET, 4)},
+        "scaling": {
+            "base_odds": BASE_ODDS,
+            "points_to_double_odds": PDO,
+            "factor": round(FACTOR, 4),
+            "offset": round(OFFSET, 4),
+        },
         "probability_of_default": round(pd, 6),
         "probability_of_default_pct": round(pd * 100, 3),
         "risk_grade": grade_for_pd(pd),
         "contributions": sorted(contributions, key=lambda c: c["points"]),
-        "missing_characteristics": [c["characteristic"] for c in contributions
-                                    if c["band"] == "missing"],
+        "missing_characteristics": [c["characteristic"] for c in contributions if c["band"] == "missing"],
         "bureau_available": bureau is not None,
         "model_version": MODEL_VERSION,
     }
@@ -515,13 +627,17 @@ async def score_credit_risk(args: ScoreArgs, ctx: ToolContext) -> dict[str, Any]
 
 class LgdArgs(BaseModel):
     application: str = Field(description="Application number or id")
-    exposure: float | None = Field(default=None, description="Exposure at default; defaults to "
-                                                             "the requested amount")
+    exposure: float | None = Field(
+        default=None, description="Exposure at default; defaults to the requested amount"
+    )
 
 
-@tool("estimate_loss_given_default",
-      "Estimate LGD from collateral cover after regulatory haircuts.",
-      LgdArgs, category="credit")
+@tool(
+    "estimate_loss_given_default",
+    "Estimate LGD from collateral cover after regulatory haircuts.",
+    LgdArgs,
+    category="credit",
+)
 async def estimate_loss_given_default(args: LgdArgs, ctx: ToolContext) -> dict[str, Any]:
     application = await _application(ctx, args.application)
     exposure = args.exposure if args.exposure is not None else application.requested_amount
@@ -535,7 +651,7 @@ async def estimate_loss_given_default(args: LgdArgs, ctx: ToolContext) -> dict[s
         detail = {"secured": False, "basis": "foundation IRB senior unsecured"}
     else:
         if haircut is None:
-            haircut = 0.50   # unrecognised collateral gets the most conservative haircut
+            haircut = 0.50  # unrecognised collateral gets the most conservative haircut
         realisable = application.collateral_value * (1 - haircut)
         cover = min(1.0, realisable / exposure)
         lgd = max(LGD_FLOOR, LGD_UNSECURED * (1 - cover))
@@ -564,17 +680,20 @@ class ExpectedLossArgs(BaseModel):
     exposure_at_default: float = Field(gt=0)
 
 
-@tool("calculate_expected_loss",
-      "Expected loss and Basel III IRB capital for a retail exposure.",
-      ExpectedLossArgs, category="credit")
+@tool(
+    "calculate_expected_loss",
+    "Expected loss and Basel III IRB capital for a retail exposure.",
+    ExpectedLossArgs,
+    category="credit",
+)
 async def calculate_expected_loss(args: ExpectedLossArgs, ctx: ToolContext) -> dict[str, Any]:
     expected_loss = args.probability_of_default * args.loss_given_default * args.exposure_at_default
-    capital = basel_irb_capital(args.probability_of_default, args.loss_given_default,
-                                args.exposure_at_default)
+    capital = basel_irb_capital(
+        args.probability_of_default, args.loss_given_default, args.exposure_at_default
+    )
     return {
         "expected_loss": round(expected_loss, 2),
-        "expected_loss_pct_of_exposure": round(
-            expected_loss / args.exposure_at_default * 100, 4),
+        "expected_loss_pct_of_exposure": round(expected_loss / args.exposure_at_default * 100, 4),
         "inputs": {
             "probability_of_default": args.probability_of_default,
             "loss_given_default": args.loss_given_default,
@@ -592,10 +711,12 @@ class PricingArgs(BaseModel):
     exposure: float | None = Field(default=None)
 
 
-@tool("price_facility",
-      "Build the risk-based rate from cost of funds, operating cost, expected loss and the "
-      "capital charge.",
-      PricingArgs, category="credit")
+@tool(
+    "price_facility",
+    "Build the risk-based rate from cost of funds, operating cost, expected loss and the capital charge.",
+    PricingArgs,
+    category="credit",
+)
 async def price_facility(args: PricingArgs, ctx: ToolContext) -> dict[str, Any]:
     application = await _application(ctx, args.application)
     exposure = args.exposure if args.exposure is not None else application.requested_amount
@@ -632,14 +753,17 @@ async def price_facility(args: PricingArgs, ctx: ToolContext) -> dict[str, Any]:
 class PolicyArgs(BaseModel):
     application: str = Field(description="Application number or id")
     bureau_score: int | None = Field(
-        default=None, description="Overrides the stored bureau score; normally omitted")
-    foir_pct: float | None = Field(
-        default=None, description="FOIR from assess_affordability")
+        default=None, description="Overrides the stored bureau score; normally omitted"
+    )
+    foir_pct: float | None = Field(default=None, description="FOIR from assess_affordability")
 
 
-@tool("check_credit_policy",
-      "Apply the hard credit policy rules. A knockout is never overridden by a good score.",
-      PolicyArgs, category="credit")
+@tool(
+    "check_credit_policy",
+    "Apply the hard credit policy rules. A knockout is never overridden by a good score.",
+    PolicyArgs,
+    category="credit",
+)
 async def check_credit_policy(args: PolicyArgs, ctx: ToolContext) -> dict[str, Any]:
     application = await _application(ctx, args.application)
     customer = await _customer(ctx, application.customer_id)
@@ -649,53 +773,71 @@ async def check_credit_policy(args: PolicyArgs, ctx: ToolContext) -> dict[str, A
         checks.append({"rule": rule, "passed": passed, "detail": detail, "knockout": knockout})
 
     age = _age(customer.date_of_birth)
-    record("minimum_age", age is not None and age >= MIN_AGE,
-           f"applicant age {age}, minimum {MIN_AGE}")
+    record("minimum_age", age is not None and age >= MIN_AGE, f"applicant age {age}, minimum {MIN_AGE}")
     if age is not None:
         age_at_maturity = age + math.ceil(application.tenure_months / 12)
-        record("age_at_maturity", age_at_maturity <= MAX_AGE_AT_MATURITY,
-               f"{age_at_maturity} at maturity, maximum {MAX_AGE_AT_MATURITY}")
+        record(
+            "age_at_maturity",
+            age_at_maturity <= MAX_AGE_AT_MATURITY,
+            f"{age_at_maturity} at maturity, maximum {MAX_AGE_AT_MATURITY}",
+        )
 
-    record("kyc_verified", customer.kyc_status == "verified",
-           f"KYC status is '{customer.kyc_status}'")
-    record("not_sanctioned", not customer.sanctions_flag,
-           "sanctions flag set on the customer" if customer.sanctions_flag else "no sanctions flag")
+    record("kyc_verified", customer.kyc_status == "verified", f"KYC status is '{customer.kyc_status}'")
+    record(
+        "not_sanctioned",
+        not customer.sanctions_flag,
+        "sanctions flag set on the customer" if customer.sanctions_flag else "no sanctions flag",
+    )
 
     max_tenure = MAX_TENURE_MONTHS.get(application.product, 84)
-    record("maximum_tenure", application.tenure_months <= max_tenure,
-           f"{application.tenure_months} months requested, maximum {max_tenure} for "
-           f"{application.product}")
+    record(
+        "maximum_tenure",
+        application.tenure_months <= max_tenure,
+        f"{application.tenure_months} months requested, maximum {max_tenure} for {application.product}",
+    )
 
     # Read the bureau rather than trusting the caller to pass it: a policy check that
     # silently fails because an argument was omitted is worse than no check.
     score = args.bureau_score
     if score is None:
-        stored = (await ctx.session.execute(
-            select(BureauRecord).where(BureauRecord.customer_id == customer.id)
-            .order_by(BureauRecord.pulled_at.desc()).limit(1)
-        )).scalar_one_or_none()
+        stored = (
+            await ctx.session.execute(
+                select(BureauRecord)
+                .where(BureauRecord.customer_id == customer.id)
+                .order_by(BureauRecord.pulled_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
         score = stored.score if stored else None
     if score is not None:
-        record("minimum_bureau_score", score >= MIN_BUREAU_SCORE,
-               f"bureau score {score}, minimum {MIN_BUREAU_SCORE}")
+        record(
+            "minimum_bureau_score",
+            score >= MIN_BUREAU_SCORE,
+            f"bureau score {score}, minimum {MIN_BUREAU_SCORE}",
+        )
     else:
-        record("minimum_bureau_score", False,
-               "no bureau record on file; a current pull is required")
+        record("minimum_bureau_score", False, "no bureau record on file; a current pull is required")
 
     if args.foir_pct is not None:
-        record("maximum_foir", args.foir_pct <= MAX_FOIR_PCT,
-               f"FOIR {args.foir_pct:.2f}%, cap {MAX_FOIR_PCT}%")
+        record(
+            "maximum_foir", args.foir_pct <= MAX_FOIR_PCT, f"FOIR {args.foir_pct:.2f}%, cap {MAX_FOIR_PCT}%"
+        )
     else:
         record("maximum_foir", False, "no FOIR supplied")
 
-    loans = (await ctx.session.execute(
-        select(func.coalesce(func.sum(Loan.outstanding), 0.0))
-        .where(Loan.customer_id == customer.id, Loan.status == "active")
-    )).scalar_one()
-    unsecured = float(loans) + (application.requested_amount
-                                if not application.collateral_type else 0.0)
-    record("unsecured_exposure_cap", unsecured <= MAX_UNSECURED_EXPOSURE,
-           f"unsecured exposure would be {unsecured:,.0f}, cap {MAX_UNSECURED_EXPOSURE:,.0f}")
+    loans = (
+        await ctx.session.execute(
+            select(func.coalesce(func.sum(Loan.outstanding), 0.0)).where(
+                Loan.customer_id == customer.id, Loan.status == "active"
+            )
+        )
+    ).scalar_one()
+    unsecured = float(loans) + (application.requested_amount if not application.collateral_type else 0.0)
+    record(
+        "unsecured_exposure_cap",
+        unsecured <= MAX_UNSECURED_EXPOSURE,
+        f"unsecured exposure would be {unsecured:,.0f}, cap {MAX_UNSECURED_EXPOSURE:,.0f}",
+    )
 
     failed = [c for c in checks if not c["passed"] and c["knockout"]]
     return {
@@ -713,13 +855,25 @@ class LimitArgs(BaseModel):
     risk_grade: str = Field(description="Grade from score_credit_risk")
 
 
-@tool("recommend_limit",
-      "Recommend the sanctioned amount from affordability, grade caps and the request.",
-      LimitArgs, category="credit")
+@tool(
+    "recommend_limit",
+    "Recommend the sanctioned amount from affordability, grade caps and the request.",
+    LimitArgs,
+    category="credit",
+)
 async def recommend_limit(args: LimitArgs, ctx: ToolContext) -> dict[str, Any]:
     application = await _application(ctx, args.application)
-    grade_cap_multiple = {"AAA": 24, "AA": 20, "A": 18, "BBB": 15, "BB": 12,
-                          "B": 8, "CCC": 4, "CC": 2, "C": 0}.get(args.risk_grade.upper(), 6)
+    grade_cap_multiple = {
+        "AAA": 24,
+        "AA": 20,
+        "A": 18,
+        "BBB": 15,
+        "BB": 12,
+        "B": 8,
+        "CCC": 4,
+        "CC": 2,
+        "C": 0,
+    }.get(args.risk_grade.upper(), 6)
     income_cap = application.declared_monthly_income * grade_cap_multiple
 
     candidates = {
@@ -728,8 +882,7 @@ async def recommend_limit(args: LimitArgs, ctx: ToolContext) -> dict[str, Any]:
         "grade_income_multiple_cap": round(income_cap, 2),
     }
     if application.collateral_value > 0:
-        ltv = {"home_loan": 0.80, "auto_loan": 0.85, "gold_loan": 0.75}.get(
-            application.product, 0.70)
+        ltv = {"home_loan": 0.80, "auto_loan": 0.85, "gold_loan": 0.75}.get(application.product, 0.70)
         candidates["collateral_ltv_cap"] = round(application.collateral_value * ltv, 2)
 
     recommended = round(min(candidates.values()), 2)
@@ -749,29 +902,38 @@ class CovenantArgs(BaseModel):
     lookback_days: int = Field(default=180, ge=30, le=730)
 
 
-@tool("evaluate_covenants",
-      "Check post-disbursement covenants on the customer's existing facilities.",
-      CovenantArgs, category="credit")
+@tool(
+    "evaluate_covenants",
+    "Check post-disbursement covenants on the customer's existing facilities.",
+    CovenantArgs,
+    category="credit",
+)
 async def evaluate_covenants(args: CovenantArgs, ctx: ToolContext) -> dict[str, Any]:
-    loans = (await ctx.session.execute(
-        select(Loan).where(Loan.customer_id == args.customer_id)
-    )).scalars().all()
+    loans = (
+        (await ctx.session.execute(select(Loan).where(Loan.customer_id == args.customer_id))).scalars().all()
+    )
     if not loans:
         return {"facilities": 0, "breaches": [], "status": "no facilities to monitor"}
 
     since = datetime.now(UTC) - timedelta(days=args.lookback_days)
-    account_ids = (await ctx.session.execute(
-        select(Account.id).where(Account.customer_id == args.customer_id)
-    )).scalars().all()
+    account_ids = (
+        (await ctx.session.execute(select(Account.id).where(Account.customer_id == args.customer_id)))
+        .scalars()
+        .all()
+    )
     credits = 0.0
     if account_ids:
-        credits = float((await ctx.session.execute(
-            select(func.coalesce(func.sum(func.abs(Transaction.amount)), 0.0)).where(
-                Transaction.account_id.in_(account_ids),
-                Transaction.booked_at >= since,
-                Transaction.direction == "credit",
-            )
-        )).scalar_one())
+        credits = float(
+            (
+                await ctx.session.execute(
+                    select(func.coalesce(func.sum(func.abs(Transaction.amount)), 0.0)).where(
+                        Transaction.account_id.in_(account_ids),
+                        Transaction.booked_at >= since,
+                        Transaction.direction == "credit",
+                    )
+                )
+            ).scalar_one()
+        )
     months = max(1, args.lookback_days // 30)
     average_monthly_inflow = credits / months
     total_emi = sum(loan.emi_amount for loan in loans)
@@ -779,18 +941,24 @@ async def evaluate_covenants(args: CovenantArgs, ctx: ToolContext) -> dict[str, 
     breaches: list[dict[str, Any]] = []
     for loan in loans:
         if loan.days_past_due > 0:
-            breaches.append({
-                "facility": loan.loan_number, "covenant": "payment_discipline",
-                "severity": "high" if loan.days_past_due >= 30 else "medium",
-                "detail": f"{loan.days_past_due} days past due",
-            })
+            breaches.append(
+                {
+                    "facility": loan.loan_number,
+                    "covenant": "payment_discipline",
+                    "severity": "high" if loan.days_past_due >= 30 else "medium",
+                    "detail": f"{loan.days_past_due} days past due",
+                }
+            )
     coverage = average_monthly_inflow / total_emi if total_emi else None
     if coverage is not None and coverage < 1.5:
-        breaches.append({
-            "facility": "portfolio", "covenant": "debt_service_coverage",
-            "severity": "high" if coverage < 1.2 else "medium",
-            "detail": f"inflow/EMI coverage {coverage:.2f}x, covenant 1.50x",
-        })
+        breaches.append(
+            {
+                "facility": "portfolio",
+                "covenant": "debt_service_coverage",
+                "severity": "high" if coverage < 1.2 else "medium",
+                "detail": f"inflow/EMI coverage {coverage:.2f}x, covenant 1.50x",
+            }
+        )
 
     return {
         "facilities": len(loans),
@@ -819,10 +987,16 @@ class DecisionArgs(BaseModel):
     scorecard: dict[str, Any] = Field(default_factory=dict)
 
 
-@tool("record_credit_decision",
-      "Record the underwriting decision against the application. Requires human approval.",
-      DecisionArgs, category="credit", writes_data=True,
-      requires_approval=True, approval_risk="high", idempotent=False)
+@tool(
+    "record_credit_decision",
+    "Record the underwriting decision against the application. Requires human approval.",
+    DecisionArgs,
+    category="credit",
+    writes_data=True,
+    requires_approval=True,
+    approval_risk="high",
+    idempotent=False,
+)
 async def record_credit_decision(args: DecisionArgs, ctx: ToolContext) -> dict[str, Any]:
     if args.decision not in {"approve", "decline", "refer"}:
         raise ValidationError("decision must be approve, decline or refer")
@@ -859,8 +1033,7 @@ async def record_credit_decision(args: DecisionArgs, ctx: ToolContext) -> dict[s
         execution_id=ctx.execution_id,
     )
     ctx.session.add(decision)
-    application.status = {"approve": "approved", "decline": "declined",
-                          "refer": "referred"}[args.decision]
+    application.status = {"approve": "approved", "decline": "declined", "refer": "referred"}[args.decision]
     await ctx.session.flush()
 
     return {
@@ -870,9 +1043,9 @@ async def record_credit_decision(args: DecisionArgs, ctx: ToolContext) -> dict[s
         "application_status": application.status,
         "approved_amount": args.approved_amount,
         "approved_rate_pct": args.approved_rate_pct,
-        "instalment": emi(args.approved_amount, args.approved_rate_pct,
-                          decision.approved_tenure_months)
-        if args.decision == "approve" and args.approved_amount else 0.0,
+        "instalment": emi(args.approved_amount, args.approved_rate_pct, decision.approved_tenure_months)
+        if args.decision == "approve" and args.approved_amount
+        else 0.0,
         "risk_grade": args.risk_grade,
         "expected_loss": decision.expected_loss,
         "risk_weighted_assets": decision.risk_weighted_assets,
@@ -889,9 +1062,12 @@ class PortfolioArgs(BaseModel):
     days: int = Field(default=180, ge=1, le=1095)
 
 
-@tool("summarise_credit_portfolio",
-      "Aggregate decisions and outstanding exposure into a portfolio risk view.",
-      PortfolioArgs, category="credit")
+@tool(
+    "summarise_credit_portfolio",
+    "Aggregate decisions and outstanding exposure into a portfolio risk view.",
+    PortfolioArgs,
+    category="credit",
+)
 async def summarise_credit_portfolio(args: PortfolioArgs, ctx: ToolContext) -> dict[str, Any]:
     since = datetime.now(UTC) - timedelta(days=args.days)
     stmt = select(CreditDecision).where(CreditDecision.created_at >= since)
@@ -905,8 +1081,7 @@ async def summarise_credit_portfolio(args: PortfolioArgs, ctx: ToolContext) -> d
     by_grade: dict[str, dict[str, Any]] = {}
     for decision in decisions:
         grade = decision.risk_grade or "unrated"
-        bucket = by_grade.setdefault(grade, {"count": 0, "exposure": 0.0, "expected_loss": 0.0,
-                                             "rwa": 0.0})
+        bucket = by_grade.setdefault(grade, {"count": 0, "exposure": 0.0, "expected_loss": 0.0, "rwa": 0.0})
         bucket["count"] += 1
         bucket["exposure"] += decision.exposure_at_default
         bucket["expected_loss"] += decision.expected_loss
@@ -922,8 +1097,10 @@ async def summarise_credit_portfolio(args: PortfolioArgs, ctx: ToolContext) -> d
             "declined": sum(1 for d in decisions if d.decision == "decline"),
             "referred": sum(1 for d in decisions if d.decision == "refer"),
             "approval_rate_pct": round(
-                sum(1 for d in decisions if d.decision == "approve") / len(decisions) * 100, 2)
-            if decisions else 0.0,
+                sum(1 for d in decisions if d.decision == "approve") / len(decisions) * 100, 2
+            )
+            if decisions
+            else 0.0,
         },
         "by_grade": {
             grade: {
@@ -939,9 +1116,9 @@ async def summarise_credit_portfolio(args: PortfolioArgs, ctx: ToolContext) -> d
             "outstanding": round(outstanding, 2),
             "npa_accounts": len(npa),
             "npa_outstanding": round(sum(loan.outstanding for loan in npa), 2),
-            "gross_npa_pct": round(
-                sum(loan.outstanding for loan in npa) / outstanding * 100, 2)
-            if outstanding else 0.0,
+            "gross_npa_pct": round(sum(loan.outstanding for loan in npa) / outstanding * 100, 2)
+            if outstanding
+            else 0.0,
         },
     }
 

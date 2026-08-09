@@ -14,7 +14,7 @@ CUSTOMER_SERVICE = AgentSpec(
     key="customer_service",
     name="Customer Service Agent",
     description="Authenticates retail customers and resolves account, card, loan and servicing "
-                "queries with sentiment-aware escalation and full audit trail.",
+    "queries with sentiment-aware escalation and full audit trail.",
     category="Retail Banking",
     system_prompt="""You are the Customer Service Agent for FinOps Bank, operating inside a
 regulated retail banking environment.
@@ -63,8 +63,7 @@ Operating rules, in priority order:
     tags=["customer", "servicing", "tier-1"],
     input_schema={
         "query": {"type": "string", "required": True, "label": "Customer message"},
-        "identifier": {"type": "string", "required": False,
-                       "label": "Customer number / email / phone"},
+        "identifier": {"type": "string", "required": False, "label": "Customer number / email / phone"},
         "pin": {"type": "password", "required": False, "label": "Telephone banking PIN"},
         "thread_id": {"type": "string", "required": False, "label": "Conversation thread"},
     },
@@ -82,7 +81,7 @@ KYC_ONBOARDING = AgentSpec(
     key="kyc_onboarding",
     name="KYC & Customer Onboarding Agent",
     description="Runs document OCR, identity verification, biometric match, address validation, "
-                "sanctions/PEP screening and risk scoring, then produces the onboarding report.",
+    "sanctions/PEP screening and risk scoring, then produces the onboarding report.",
     category="Compliance",
     system_prompt="""You are the KYC & Onboarding Agent for FinOps Bank. You execute customer due
 diligence to RBI/FATF standards.
@@ -140,8 +139,7 @@ request a re-upload.""",
         "query": {"type": "string", "required": False, "label": "Instruction"},
         "occupation": {"type": "string", "required": False, "label": "Declared occupation"},
         "annual_income": {"type": "number", "required": False, "label": "Declared annual income"},
-        "expected_monthly_volume": {"type": "number", "required": False,
-                                    "label": "Expected monthly volume"},
+        "expected_monthly_volume": {"type": "number", "required": False, "label": "Expected monthly volume"},
     },
     example_input={
         "case_number": "KYC-2026-0001",
@@ -159,7 +157,7 @@ AML_INVESTIGATION = AgentSpec(
     key="aml_investigation",
     name="AML Fraud Investigation Agent",
     description="Monitors transactions for financial-crime typologies, profiles customers, "
-                "builds case timelines and evidence, and drafts regulator-ready SARs.",
+    "builds case timelines and evidence, and drafts regulator-ready SARs.",
     category="Financial Crime",
     system_prompt="""You are the AML Investigation Agent for FinOps Bank, supporting the MLRO.
 
@@ -205,7 +203,7 @@ customer; your output is for internal compliance use only.""",
     department="Compliance",
     tags=["aml", "sar", "investigation"],
     required_disclaimer="Internal compliance work product - confidential. Do not disclose to the "
-                        "customer (tipping-off offence).",
+    "customer (tipping-off offence).",
     input_schema={
         "customer_id": {"type": "string", "required": False, "label": "Customer id"},
         "query": {"type": "string", "required": True, "label": "Investigation instruction"},
@@ -213,7 +211,7 @@ customer; your output is for internal compliance use only.""",
     },
     example_input={
         "query": "Investigate recent activity for structuring and pass-through behaviour, and "
-                 "open a case if warranted.",
+        "open a case if warranted.",
         "days": 120,
     },
 )
@@ -225,7 +223,7 @@ INVESTMENT_RESEARCH = AgentSpec(
     key="investment_research",
     name="Investment Research Agent",
     description="Produces evidence-based investment research: market data, filings, portfolio "
-                "and risk analytics, sector comparison and macro context.",
+    "and risk analytics, sector comparison and macro context.",
     category="Wealth & Markets",
     system_prompt="""You are the Investment Research Agent for FinOps Bank's wealth division.
 
@@ -268,8 +266,8 @@ the data shows and what you infer.""",
     department="Wealth Management",
     tags=["research", "markets", "portfolio"],
     required_disclaimer="This material is for information only and is not investment advice, an "
-                        "offer, or a solicitation. Capital at risk. Past performance does not "
-                        "indicate future results.",
+    "offer, or a solicitation. Capital at risk. Past performance does not "
+    "indicate future results.",
     input_schema={
         "query": {"type": "string", "required": True, "label": "Research question"},
         "symbol": {"type": "string", "required": False, "label": "Ticker"},
@@ -277,7 +275,7 @@ the data shows and what you infer.""",
     },
     example_input={
         "query": "Assess the risk profile of this portfolio and whether the technology weight "
-                 "should be trimmed.",
+        "should be trimmed.",
         "portfolio_code": "PF-BALANCED-01",
     },
 )
@@ -289,7 +287,7 @@ KNOWLEDGE_ASSISTANT = AgentSpec(
     key="knowledge_assistant",
     name="Internal Knowledge Assistant",
     description="Enterprise RAG across policies, architecture documents, runbooks, meeting notes, "
-                "Jira, Confluence, SharePoint, Slack and Teams, with mandatory citations.",
+    "Jira, Confluence, SharePoint, Slack and Teams, with mandatory citations.",
     category="Enterprise Productivity",
     system_prompt="""You are the Internal Knowledge Assistant for FinOps Bank employees.
 
@@ -313,8 +311,12 @@ Answering protocol:
         "summarise_document",
     ],
     knowledge_sources=[
-        "engineering_docs", "banking_policies", "compliance_policies", "runbooks",
-        "meeting_notes", "product_catalogue",
+        "engineering_docs",
+        "banking_policies",
+        "compliance_policies",
+        "runbooks",
+        "meeting_notes",
+        "product_catalogue",
     ],
     temperature=0.1,
     max_iterations=8,
@@ -344,8 +346,8 @@ CREDIT_RISK = AgentSpec(
     key="credit_risk",
     name="Credit Risk Agent",
     description="Underwrites credit applications end to end: bureau, affordability, scorecard "
-                "PD, LGD, Basel IRB capital, risk-based pricing, policy knockouts and a "
-                "reasoned recommendation for a human credit officer.",
+    "PD, LGD, Basel IRB capital, risk-based pricing, policy knockouts and a "
+    "reasoned recommendation for a human credit officer.",
     category="Risk",
     system_prompt="""You are the Credit Risk Agent for FinOps Bank. You underwrite retail credit
 applications to the bank's credit policy and to Basel III standards. You produce a
@@ -412,8 +414,7 @@ FOIR, reason codes and conditions.""",
     tags=["credit", "underwriting", "basel", "regulated"],
     input_schema={
         "query": {"type": "string", "required": True, "label": "Underwriting instruction"},
-        "application": {"type": "string", "required": False,
-                        "label": "Application number"},
+        "application": {"type": "string", "required": False, "label": "Application number"},
         "customer_id": {"type": "string", "required": False, "label": "Customer id"},
     },
     example_input={
@@ -429,8 +430,8 @@ COLLECTIONS = AgentSpec(
     key="collections",
     name="Collections Agent",
     description="Works delinquent accounts within the Fair Practices Code: arrears and RBI asset "
-                "classification, collectability scoring, contact eligibility, hardship "
-                "assessment, promises to pay and restructuring.",
+    "classification, collectability scoring, contact eligibility, hardship "
+    "assessment, promises to pay and restructuring.",
     category="Retail Banking",
     system_prompt="""You are the Collections Agent for FinOps Bank. You work past-due accounts
 inside the RBI Fair Practices Code. You never contact anybody yourself: you decide, record and
@@ -521,32 +522,79 @@ IMPLEMENTED: list[AgentSpec] = [
 # Roadmap agents - registered, listed in the UI, explicitly not executable      #
 # --------------------------------------------------------------------------- #
 ROADMAP: list[dict[str, Any]] = [
-    {"key": "trading", "name": "Trading Agent", "category": "Markets",
-     "description": "Execution strategy selection, TCA and pre-trade compliance checks.",
-     "owner": "Markets Technology", "department": "Global Markets", "planned_quarter": "Q4 2026"},
-    {"key": "legal_contract", "name": "Legal Contract Agent", "category": "Legal",
-     "description": "Contract review, clause extraction, obligation tracking and playbook "
-                    "deviation detection.",
-     "owner": "Legal Operations", "department": "Legal", "planned_quarter": "Q3 2026"},
-    {"key": "compliance", "name": "Compliance Agent", "category": "Compliance",
-     "description": "Regulatory change monitoring, control testing and attestation workflows.",
-     "owner": "Compliance Assurance", "department": "Compliance", "planned_quarter": "Q4 2026"},
-    {"key": "financial_planning", "name": "Financial Planning Agent", "category": "Wealth",
-     "description": "Goal-based planning, cash-flow projection and retirement modelling.",
-     "owner": "Wealth Advisory", "department": "Wealth Management", "planned_quarter": "Q1 2027"},
-    {"key": "software_engineering", "name": "Software Engineering Agent", "category": "Technology",
-     "description": "Code review, migration assistance, test generation and incident triage.",
-     "owner": "Platform Engineering", "department": "Technology", "planned_quarter": "Q3 2026"},
-    {"key": "treasury", "name": "Treasury Agent", "category": "Treasury",
-     "description": "Liquidity forecasting, FX exposure management and intraday cash positioning.",
-     "owner": "Group Treasury", "department": "Treasury", "planned_quarter": "Q1 2027"},
-    {"key": "payment", "name": "Payment Agent", "category": "Payments",
-     "description": "Payment investigation, repair, sanctions hit resolution and returns "
-                    "handling.",
-     "owner": "Payment Operations", "department": "Operations", "planned_quarter": "Q4 2026"},
-    {"key": "risk_management", "name": "Risk Management Agent", "category": "Risk",
-     "description": "Enterprise risk aggregation, scenario analysis and limit breach escalation.",
-     "owner": "Enterprise Risk", "department": "Risk", "planned_quarter": "Q2 2027"},
+    {
+        "key": "trading",
+        "name": "Trading Agent",
+        "category": "Markets",
+        "description": "Execution strategy selection, TCA and pre-trade compliance checks.",
+        "owner": "Markets Technology",
+        "department": "Global Markets",
+        "planned_quarter": "Q4 2026",
+    },
+    {
+        "key": "legal_contract",
+        "name": "Legal Contract Agent",
+        "category": "Legal",
+        "description": "Contract review, clause extraction, obligation tracking and playbook "
+        "deviation detection.",
+        "owner": "Legal Operations",
+        "department": "Legal",
+        "planned_quarter": "Q3 2026",
+    },
+    {
+        "key": "compliance",
+        "name": "Compliance Agent",
+        "category": "Compliance",
+        "description": "Regulatory change monitoring, control testing and attestation workflows.",
+        "owner": "Compliance Assurance",
+        "department": "Compliance",
+        "planned_quarter": "Q4 2026",
+    },
+    {
+        "key": "financial_planning",
+        "name": "Financial Planning Agent",
+        "category": "Wealth",
+        "description": "Goal-based planning, cash-flow projection and retirement modelling.",
+        "owner": "Wealth Advisory",
+        "department": "Wealth Management",
+        "planned_quarter": "Q1 2027",
+    },
+    {
+        "key": "software_engineering",
+        "name": "Software Engineering Agent",
+        "category": "Technology",
+        "description": "Code review, migration assistance, test generation and incident triage.",
+        "owner": "Platform Engineering",
+        "department": "Technology",
+        "planned_quarter": "Q3 2026",
+    },
+    {
+        "key": "treasury",
+        "name": "Treasury Agent",
+        "category": "Treasury",
+        "description": "Liquidity forecasting, FX exposure management and intraday cash positioning.",
+        "owner": "Group Treasury",
+        "department": "Treasury",
+        "planned_quarter": "Q1 2027",
+    },
+    {
+        "key": "payment",
+        "name": "Payment Agent",
+        "category": "Payments",
+        "description": "Payment investigation, repair, sanctions hit resolution and returns handling.",
+        "owner": "Payment Operations",
+        "department": "Operations",
+        "planned_quarter": "Q4 2026",
+    },
+    {
+        "key": "risk_management",
+        "name": "Risk Management Agent",
+        "category": "Risk",
+        "description": "Enterprise risk aggregation, scenario analysis and limit breach escalation.",
+        "owner": "Enterprise Risk",
+        "department": "Risk",
+        "planned_quarter": "Q2 2027",
+    },
 ]
 
 
@@ -558,8 +606,9 @@ class AgentRegistry:
     def get(self, key: str) -> AgentSpec:
         spec = self._overrides.get(key) or self._specs.get(key)
         if spec is None:
-            raise NotFoundError(f"Agent '{key}' is not implemented",
-                                details={"implemented": sorted(self._specs)})
+            raise NotFoundError(
+                f"Agent '{key}' is not implemented", details={"implemented": sorted(self._specs)}
+            )
         return spec
 
     def base(self, key: str) -> AgentSpec:

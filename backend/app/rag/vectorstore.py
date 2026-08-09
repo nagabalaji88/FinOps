@@ -105,8 +105,10 @@ class PostgresStore(VectorStore):
         min_score: float = 0.0,
     ) -> list[VectorMatch]:
         started = time.perf_counter()
-        stmt = select(Chunk, Document).join(Document, Chunk.document_id == Document.id).where(
-            Chunk.embedding.is_not(None)
+        stmt = (
+            select(Chunk, Document)
+            .join(Document, Chunk.document_id == Document.id)
+            .where(Chunk.embedding.is_not(None))
         )
         if source_keys:
             stmt = stmt.where(Chunk.source_key.in_(source_keys))
@@ -127,11 +129,16 @@ class PostgresStore(VectorStore):
                 continue
             matches.append(
                 VectorMatch(
-                    chunk_id=chunk.id, document_id=chunk.document_id, source_key=chunk.source_key,
-                    content=chunk.content, score=score, heading=chunk.heading,
-                    title=document.title, uri=document.uri, chunk_index=chunk.chunk_index,
-                    metadata={**(chunk.chunk_metadata or {}),
-                              "classification": document.classification},
+                    chunk_id=chunk.id,
+                    document_id=chunk.document_id,
+                    source_key=chunk.source_key,
+                    content=chunk.content,
+                    score=score,
+                    heading=chunk.heading,
+                    title=document.title,
+                    uri=document.uri,
+                    chunk_index=chunk.chunk_index,
+                    metadata={**(chunk.chunk_metadata or {}), "classification": document.classification},
                 )
             )
         matches.sort(key=lambda m: m.score, reverse=True)

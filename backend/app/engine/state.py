@@ -139,11 +139,13 @@ class ExecutionState:
             "cost_usd": self.cost_usd,
             "model": self.model,
             "provider": self.provider,
-            "budget": {"max_cost_usd": self.budget.max_cost_usd, "spent_usd": self.budget.spent_usd,
-                       "tokens_used": self.budget.tokens_used},
+            "budget": {
+                "max_cost_usd": self.budget.max_cost_usd,
+                "spent_usd": self.budget.spent_usd,
+                "tokens_used": self.budget.tokens_used,
+            },
             "pending_tool_calls": [
-                {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
-                for tc in self.pending_tool_calls
+                {"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in self.pending_tool_calls
             ],
             "approved_tool_calls": self.approved_tool_calls,
             "root_span_id": self.root_span_id,

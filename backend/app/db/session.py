@@ -39,9 +39,8 @@ if settings.is_sqlite:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-SessionFactory = async_sessionmaker(
-    engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
-)
+
+SessionFactory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False, autoflush=False)
 
 # Ambient session for background writers (cost ledger, tool health) so telemetry joins the
 # caller's transaction instead of opening a second connection and contending for the write

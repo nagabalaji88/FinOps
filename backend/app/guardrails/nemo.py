@@ -98,14 +98,10 @@ class NemoGuardrails:
     def configured_agents(self) -> list[str]:
         if not self._root.is_dir():
             return []
-        return sorted(
-            path.name for path in self._root.iterdir() if (path / "config.yml").is_file()
-        )
+        return sorted(path.name for path in self._root.iterdir() if (path / "config.yml").is_file())
 
     def covers(self, agent_key: str) -> bool:
-        return settings.nemo_guardrails_enabled and (
-            self._root / agent_key / "config.yml"
-        ).is_file()
+        return settings.nemo_guardrails_enabled and (self._root / agent_key / "config.yml").is_file()
 
     def _llm_rails_available(self) -> bool:
         """LLM-backed rails need the operator's consent and a provider that can be reached.
@@ -135,9 +131,7 @@ class NemoGuardrails:
             try:
                 from nemoguardrails import LLMRails, RailsConfig
             except ImportError as exc:  # pragma: no cover - depends on the extra
-                self._import_error = (
-                    "nemoguardrails is not installed; install the 'guardrails' extra"
-                )
+                self._import_error = "nemoguardrails is not installed; install the 'guardrails' extra"
                 self._errors[agent_key] = self._import_error
                 log.warning("nemo_guardrails_unavailable", error=str(exc))
                 return None
@@ -164,16 +158,19 @@ class NemoGuardrails:
             return rails
 
     # --- evaluation ----------------------------------------------------------
-    async def check_input(self, agent_key: str, text: str,
-                          *, context: dict[str, Any] | None = None) -> RailResult:
+    async def check_input(
+        self, agent_key: str, text: str, *, context: dict[str, Any] | None = None
+    ) -> RailResult:
         return await self._run(agent_key, "input", text, context or {})
 
-    async def check_output(self, agent_key: str, text: str, *, user_text: str = "",
-                           context: dict[str, Any] | None = None) -> RailResult:
+    async def check_output(
+        self, agent_key: str, text: str, *, user_text: str = "", context: dict[str, Any] | None = None
+    ) -> RailResult:
         return await self._run(agent_key, "output", text, context or {}, user_text=user_text)
 
-    async def _run(self, agent_key: str, side: str, text: str,
-                   context: dict[str, Any], *, user_text: str = "") -> RailResult:
+    async def _run(
+        self, agent_key: str, side: str, text: str, context: dict[str, Any], *, user_text: str = ""
+    ) -> RailResult:
         if not settings.nemo_guardrails_enabled:
             return RailResult(evaluated=False, reason="disabled")
         if not self.covers(agent_key):
@@ -185,15 +182,16 @@ class NemoGuardrails:
             # would silently drop a compliance control, so the run is refused instead.
             reason = self._errors.get(agent_key, "load_failed")
             return RailResult(
-                evaluated=True, blocked=True, reason=reason,
+                evaluated=True,
+                blocked=True,
+                reason=reason,
                 findings=[RailFinding("rails_unavailable", "critical", "blocked", reason)],
             )
 
         messages = (
             [{"role": "user", "content": text}]
             if side == "input"
-            else [{"role": "user", "content": user_text or ""},
-                  {"role": "assistant", "content": text}]
+            else [{"role": "user", "content": user_text or ""}, {"role": "assistant", "content": text}]
         )
         options = {
             "rails": [side],
@@ -202,20 +200,23 @@ class NemoGuardrails:
         }
         try:
             response = await rails.generate_async(
-                messages=messages, options=options,
+                messages=messages,
+                options=options,
                 state={"context": {"pii_allowlist": context.get("pii_allowlist", [])}}
-                if context.get("pii_allowlist") else None,
+                if context.get("pii_allowlist")
+                else None,
             )
         except Exception as exc:
             # A rail that cannot run is a blocked run, not a passed one.
             log.error("nemo_rail_error", agent=agent_key, side=side, error=str(exc))
             return RailResult(
-                evaluated=True, blocked=True, reason=f"rail_error: {exc}",
+                evaluated=True,
+                blocked=True,
+                reason=f"rail_error: {exc}",
                 findings=[RailFinding("rail_error", "high", "blocked", str(exc)[:300])],
             )
 
-        return _interpret(response, side=side, original=text,
-                          llm_rails=self._llm_rails_available())
+        return _interpret(response, side=side, original=text, llm_rails=self._llm_rails_available())
 
     # --- reporting -----------------------------------------------------------
     def status(self) -> dict[str, Any]:
@@ -256,8 +257,7 @@ class NemoGuardrails:
             "llm_rails_reason": _llm_rails_reason(llm_rails, configured, usable),
             "providers_configured": configured,
             "providers_usable": usable,
-            "note": None if llm_rails else
-            "LLM-backed rails are off — deterministic rails only",
+            "note": None if llm_rails else "LLM-backed rails are off — deterministic rails only",
             "errors": dict(self._errors) or None,
             "required": ["nemoguardrails"] if not installed else [],
         }
@@ -271,8 +271,10 @@ def _llm_rails_reason(enabled: bool, configured: list[str], usable: list[str]) -
         return "disabled by NEMO_LLM_RAILS_ENABLED"
     if not configured:
         return "no LLM provider is configured"
-    return (f"provider(s) {', '.join(configured)} are configured but unreachable "
-            f"(circuit open); deterministic rails continue to run")
+    return (
+        f"provider(s) {', '.join(configured)} are configured but unreachable "
+        f"(circuit open); deterministic rails continue to run"
+    )
 
 
 def _router_llm(agent_key: str) -> Any:
@@ -306,8 +308,9 @@ def _interpret(response: Any, *, side: str, original: str, llm_rails: bool) -> R
         detail = payload.get("content") or {}
         message = detail.get("message") if isinstance(detail, dict) else str(detail)
         finding = _parse_hit(str(message or "rail"))
-        return RailResult(evaluated=True, blocked=True, findings=[finding],
-                          reason=finding.rule, llm_rails=llm_rails)
+        return RailResult(
+            evaluated=True, blocked=True, findings=[finding], reason=finding.rule, llm_rails=llm_rails
+        )
 
     findings: list[RailFinding] = []
     output_data = getattr(response, "output_data", None) or {}
@@ -316,8 +319,9 @@ def _interpret(response: Any, *, side: str, original: str, llm_rails: bool) -> R
         finding = _parse_hit(str(masked))
         if finding.rule == "rail_error":
             # The detector could not run. Blocking is the only safe reading.
-            return RailResult(evaluated=True, blocked=True, findings=[finding],
-                              reason=finding.detail, llm_rails=llm_rails)
+            return RailResult(
+                evaluated=True, blocked=True, findings=[finding], reason=finding.detail, llm_rails=llm_rails
+            )
         finding.action = "masked"
         findings.append(finding)
 
@@ -325,8 +329,13 @@ def _interpret(response: Any, *, side: str, original: str, llm_rails: bool) -> R
     if side == "output" and text and text != original and not findings:
         findings.append(RailFinding("rail_rewrite", "low", "masked", "output rail rewrote the response"))
 
-    return RailResult(evaluated=True, blocked=False, findings=findings,
-                      text=text if side == "output" else None, llm_rails=llm_rails)
+    return RailResult(
+        evaluated=True,
+        blocked=False,
+        findings=findings,
+        text=text if side == "output" else None,
+        llm_rails=llm_rails,
+    )
 
 
 #: Process-wide instance; rail configs are immutable at runtime.

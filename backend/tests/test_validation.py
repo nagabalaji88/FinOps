@@ -47,11 +47,11 @@ class TestScenarioCatalogue:
         assert len(set(ids)) == len(ids)
 
     def test_every_implemented_agent_is_covered_four_times(self):
-        assert set(agent_keys()) == IMPLEMENTED, (
-            f"uncovered: {sorted(IMPLEMENTED - set(agent_keys()))}")
+        assert set(agent_keys()) == IMPLEMENTED, f"uncovered: {sorted(IMPLEMENTED - set(agent_keys()))}"
         for key in IMPLEMENTED:
-            assert len(for_agent(key)) == SCENARIOS_PER_AGENT, \
+            assert len(for_agent(key)) == SCENARIOS_PER_AGENT, (
                 f"{key} should have {SCENARIOS_PER_AGENT} scenarios"
+            )
 
     def test_scenarios_target_implemented_agents_only(self):
         assert all(s.agent_key in IMPLEMENTED for s in SCENARIOS)
@@ -69,8 +69,7 @@ class TestScenarioCatalogue:
     def test_pattern_fields_are_tuples_not_strings(self):
         """`must_match=("a|b")` is a string; iterating it asserts one character at a time."""
         for scenario in SCENARIOS:
-            for name in ("tools_called", "tools_forbidden", "must_match", "must_not_match",
-                         "output_keys"):
+            for name in ("tools_called", "tools_forbidden", "must_match", "must_not_match", "output_keys"):
                 value = getattr(scenario.expect, name)
                 assert isinstance(value, tuple), f"{scenario.id}.{name} is {type(value)}"
 
@@ -126,22 +125,16 @@ class TestAssertionEngine:
         assert any(c.name == "status" and c.failed for c in checks)
 
     def test_missing_tool_fails(self):
-        checks = evaluate(
-            Expectation(tools_called=("analyse_portfolio",)), _observed()
-        )
+        checks = evaluate(Expectation(tools_called=("analyse_portfolio",)), _observed())
         failure = next(c for c in checks if c.name == "tools_called")
         assert failure.failed and "analyse_portfolio" in failure.detail
 
     def test_forbidden_tool_fails(self):
-        checks = evaluate(
-            Expectation(tools_forbidden=("search_knowledge_base",)), _observed()
-        )
+        checks = evaluate(Expectation(tools_forbidden=("search_knowledge_base",)), _observed())
         assert any(c.name == "tools_forbidden" and c.failed for c in checks)
 
     def test_failed_tool_call_is_reported(self):
-        checks = evaluate(
-            Expectation(), _observed(tool_invocations=[("search_knowledge_base", False)])
-        )
+        checks = evaluate(Expectation(), _observed(tool_invocations=[("search_knowledge_base", False)]))
         assert any(c.name == "tool_success" and c.failed for c in checks)
 
     def test_missing_required_content_fails(self):
@@ -184,8 +177,9 @@ class TestAssertionEngine:
     def test_approval_on_the_wrong_tool_fails(self):
         checks = evaluate(
             Expectation(approval_expected=True, approval_on_tool="generate_sar"),
-            _observed(approvals=[{"id": "a1", "status": "approved",
-                                  "payload": {"tool": "escalate_to_human"}}]),
+            _observed(
+                approvals=[{"id": "a1", "status": "approved", "payload": {"tool": "escalate_to_human"}}]
+            ),
         )
         assert any(c.name == "approval_on_tool" and c.failed for c in checks)
 
@@ -248,9 +242,7 @@ class TestRunnerEndToEnd:
         from app.agents.registry import agent_registry
 
         async with SessionFactory() as session:
-            agent = (
-                await session.execute(select(Agent).where(Agent.key == agent_key))
-            ).scalar_one()
+            agent = (await session.execute(select(Agent).where(Agent.key == agent_key))).scalar_one()
             config = {**(agent.config or {}), "model": TEST_MODEL}
             agent.config = config
             await session.commit()
@@ -263,9 +255,7 @@ class TestRunnerEndToEnd:
         assert report["reviewer_present"] is True
         assert report["sample_banking_customers"] > 0
 
-    async def test_knowledge_scenario_passes_against_a_correct_answer(
-        self, _register_scripted_model
-    ):
+    async def test_knowledge_scenario_passes_against_a_correct_answer(self, _register_scripted_model):
         provider = _register_scripted_model
         provider.queue_text(
             '{"objective":"Explain the severity model","steps":[],"required_tools":'
@@ -366,9 +356,7 @@ class TestRunnerEndToEnd:
         report = await ValidationRunner().run(requested)
         assert [r.scenario.id for r in report.results] == ["KA-03", "KA-01", "KA-02"]
 
-    async def test_live_output_shows_the_input_and_the_agent_response(
-        self, _register_scripted_model
-    ):
+    async def test_live_output_shows_the_input_and_the_agent_response(self, _register_scripted_model):
         """The one-stop run must print what went in and what came back, per input."""
         provider = _register_scripted_model
         provider.queue_text(

@@ -63,53 +63,78 @@ async def seed_identities(session: AsyncSession) -> dict[str, Any]:
     for email, name, roles, department in users:
         session.add(
             User(
-                email=email, full_name=name, roles=roles, department=department,
+                email=email,
+                full_name=name,
+                roles=roles,
+                department=department,
                 hashed_password=hash_password(settings.bootstrap_admin_password),
             )
         )
     await session.flush()
-    log.info("identities_seeded", count=len(users),
-             note="All seeded accounts share BOOTSTRAP_ADMIN_PASSWORD - rotate before production")
+    log.info(
+        "identities_seeded",
+        count=len(users),
+        note="All seeded accounts share BOOTSTRAP_ADMIN_PASSWORD - rotate before production",
+    )
     return {"users_created": len(users)}
 
 
-async def _ensure_current_version(session: AsyncSession, agent: Agent,
-                                  config: dict[str, Any], changelog: str) -> None:
+async def _ensure_current_version(
+    session: AsyncSession, agent: Agent, config: dict[str, Any], changelog: str
+) -> None:
     """Give the agent a published version row if it has none.
 
     A promoted roadmap agent never had one — it was a placeholder — and the version history
     endpoints and the rollback path both assume a current version exists.
     """
     existing = (
-        await session.execute(select(AgentVersion).where(AgentVersion.agent_id == agent.id))
-    ).scalars().first()
+        (await session.execute(select(AgentVersion).where(AgentVersion.agent_id == agent.id)))
+        .scalars()
+        .first()
+    )
     if existing is not None:
         return
-    session.add(AgentVersion(agent_id=agent.id, version=agent.version or 1, config=config,
-                             changelog=changelog, published=True,
-                             published_at=datetime.now(UTC), published_by="system",
-                             is_current=True))
+    session.add(
+        AgentVersion(
+            agent_id=agent.id,
+            version=agent.version or 1,
+            config=config,
+            changelog=changelog,
+            published=True,
+            published_at=datetime.now(UTC),
+            published_by="system",
+            is_current=True,
+        )
+    )
 
 
 async def seed_agents(session: AsyncSession) -> dict[str, Any]:
     created = updated = 0
     for spec in IMPLEMENTED:
-        agent = (
-            await session.execute(select(Agent).where(Agent.key == spec.key))
-        ).scalar_one_or_none()
+        agent = (await session.execute(select(Agent).where(Agent.key == spec.key))).scalar_one_or_none()
         config = spec.to_config()
         if agent is None:
             agent = Agent(
-                key=spec.key, name=spec.name, description=spec.description,
-                category=spec.category, availability="implemented", lifecycle_state="active",
-                owner=spec.owner, owner_email=spec.owner_email, department=spec.department,
-                version=1, is_builtin=True, config=config, tags=spec.tags, tools=spec.tools,
-                knowledge_sources=spec.knowledge_sources, sla_latency_ms=spec.sla_latency_ms,
+                key=spec.key,
+                name=spec.name,
+                description=spec.description,
+                category=spec.category,
+                availability="implemented",
+                lifecycle_state="active",
+                owner=spec.owner,
+                owner_email=spec.owner_email,
+                department=spec.department,
+                version=1,
+                is_builtin=True,
+                config=config,
+                tags=spec.tags,
+                tools=spec.tools,
+                knowledge_sources=spec.knowledge_sources,
+                sla_latency_ms=spec.sla_latency_ms,
             )
             session.add(agent)
             await session.flush()
-            await _ensure_current_version(session, agent, config,
-                                          "Built-in agent definition")
+            await _ensure_current_version(session, agent, config, "Built-in agent definition")
             created += 1
         elif agent.availability == "coming_soon":
             # The agent has shipped since this database was seeded. The roadmap row is the
@@ -125,8 +150,7 @@ async def seed_agents(session: AsyncSession) -> dict[str, Any]:
             agent.knowledge_sources = spec.knowledge_sources
             agent.sla_latency_ms = spec.sla_latency_ms
             agent.version = agent.version or 1
-            await _ensure_current_version(session, agent, config,
-                                          "Promoted from roadmap to implemented")
+            await _ensure_current_version(session, agent, config, "Promoted from roadmap to implemented")
             log.info("agent_promoted", agent=spec.key)
             updated += 1
         elif agent.is_builtin and not agent.config:
@@ -134,16 +158,19 @@ async def seed_agents(session: AsyncSession) -> dict[str, Any]:
             updated += 1
 
     for entry in ROADMAP:
-        agent = (
-            await session.execute(select(Agent).where(Agent.key == entry["key"]))
-        ).scalar_one_or_none()
+        agent = (await session.execute(select(Agent).where(Agent.key == entry["key"]))).scalar_one_or_none()
         if agent is None:
             session.add(
                 Agent(
-                    key=entry["key"], name=entry["name"], description=entry["description"],
-                    category=entry["category"], availability="coming_soon",
-                    lifecycle_state="disabled", owner=entry["owner"],
-                    department=entry["department"], is_builtin=True,
+                    key=entry["key"],
+                    name=entry["name"],
+                    description=entry["description"],
+                    category=entry["category"],
+                    availability="coming_soon",
+                    lifecycle_state="disabled",
+                    owner=entry["owner"],
+                    department=entry["department"],
+                    is_builtin=True,
                     config={"planned_quarter": entry["planned_quarter"]},
                     tags=["roadmap"],
                 )
@@ -159,9 +186,7 @@ async def seed_knowledge(session: AsyncSession) -> dict[str, Any]:
     created_sources = 0
     for definition in KNOWLEDGE_SOURCES:
         source = (
-            await session.execute(
-                select(KnowledgeSource).where(KnowledgeSource.key == definition["key"])
-            )
+            await session.execute(select(KnowledgeSource).where(KnowledgeSource.key == definition["key"]))
         ).scalar_one_or_none()
         if source is None:
             session.add(KnowledgeSource(**definition))
@@ -199,13 +224,18 @@ async def seed_watchlists(session: AsyncSession) -> dict[str, Any]:
     for entry in INTERNAL_WATCHLIST:
         session.add(
             SanctionsEntry(
-                list_name=entry["list_name"], entry_type=entry.get("entry_type", "individual"),
+                list_name=entry["list_name"],
+                entry_type=entry.get("entry_type", "individual"),
                 full_name=entry["full_name"],
                 normalised_name=normalise_name(entry["full_name"]),
-                aliases=entry.get("aliases", []), date_of_birth=entry.get("date_of_birth"),
-                nationality=entry.get("nationality"), program=entry.get("program"),
-                position=entry.get("position"), is_pep=entry.get("is_pep", False),
-                source_url=entry.get("source_url"), remarks=entry.get("remarks"),
+                aliases=entry.get("aliases", []),
+                date_of_birth=entry.get("date_of_birth"),
+                nationality=entry.get("nationality"),
+                program=entry.get("program"),
+                position=entry.get("position"),
+                is_pep=entry.get("is_pep", False),
+                source_url=entry.get("source_url"),
+                remarks=entry.get("remarks"),
             )
         )
     await session.flush()
@@ -227,8 +257,7 @@ async def seed_feature_flags(session: AsyncSession) -> dict[str, Any]:
             await session.execute(select(FeatureFlag).where(FeatureFlag.key == key))
         ).scalar_one_or_none()
         if existing is None:
-            session.add(FeatureFlag(key=key, description=description, enabled=enabled,
-                                    updated_by="system"))
+            session.add(FeatureFlag(key=key, description=description, enabled=enabled, updated_by="system"))
             created += 1
     return {"feature_flags_created": created}
 
@@ -248,19 +277,68 @@ async def bootstrap(session: AsyncSession) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Sample banking environment (opt-in via `finops seed-banking`)                #
 # --------------------------------------------------------------------------- #
-FIRST_NAMES = ["Aarav", "Diya", "Vihaan", "Ananya", "Arjun", "Ishita", "Kabir", "Meera",
-               "Rohan", "Sara", "Vikram", "Priya", "Karan", "Nisha", "Rahul", "Tara"]
-LAST_NAMES = ["Sharma", "Patel", "Reddy", "Iyer", "Nair", "Gupta", "Kulkarni", "Bose",
-              "Chatterjee", "Menon", "Desai", "Rao"]
-MERCHANTS = ["BigBazaar Retail", "Swiggy Foods", "Indian Oil", "Amazon India", "Apollo Pharmacy",
-             "IRCTC", "Croma Electronics", "Reliance Digital", "Uber India", "Airtel Payments"]
-CATEGORIES = ["groceries", "dining", "fuel", "shopping", "healthcare", "travel", "electronics",
-              "utilities", "transport", "telecom"]
+FIRST_NAMES = [
+    "Aarav",
+    "Diya",
+    "Vihaan",
+    "Ananya",
+    "Arjun",
+    "Ishita",
+    "Kabir",
+    "Meera",
+    "Rohan",
+    "Sara",
+    "Vikram",
+    "Priya",
+    "Karan",
+    "Nisha",
+    "Rahul",
+    "Tara",
+]
+LAST_NAMES = [
+    "Sharma",
+    "Patel",
+    "Reddy",
+    "Iyer",
+    "Nair",
+    "Gupta",
+    "Kulkarni",
+    "Bose",
+    "Chatterjee",
+    "Menon",
+    "Desai",
+    "Rao",
+]
+MERCHANTS = [
+    "BigBazaar Retail",
+    "Swiggy Foods",
+    "Indian Oil",
+    "Amazon India",
+    "Apollo Pharmacy",
+    "IRCTC",
+    "Croma Electronics",
+    "Reliance Digital",
+    "Uber India",
+    "Airtel Payments",
+]
+CATEGORIES = [
+    "groceries",
+    "dining",
+    "fuel",
+    "shopping",
+    "healthcare",
+    "travel",
+    "electronics",
+    "utilities",
+    "transport",
+    "telecom",
+]
 COUNTRIES = ["IND", "IND", "IND", "IND", "ARE", "SGP", "GBR", "USA", "IRN", "RUS"]
 
 
-async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
-                              seed: int = 20260401) -> dict[str, Any]:
+async def seed_sample_banking(
+    session: AsyncSession, *, customers: int = 24, seed: int = 20260401
+) -> dict[str, Any]:
     """Populate a representative retail-banking dataset for evaluation environments."""
     existing = int((await session.execute(select(func.count(Customer.id)))).scalar_one())
     if existing:
@@ -300,13 +378,18 @@ async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
 
     account_count = txn_count = 0
     for index, customer in enumerate(created_customers):
-        for kind in (["savings", "current"] if customer.segment == "sme" else ["savings"]):
+        for kind in ["savings", "current"] if customer.segment == "sme" else ["savings"]:
             balance = round(rng.uniform(15_000, 4_500_000), 2)
             account = Account(
                 account_number=f"5001{index:04d}{rng.randint(1000, 9999)}",
-                customer_id=customer.id, account_type=kind, currency="INR",
-                balance=balance, available_balance=balance, status="active",
-                branch_code=f"BR{rng.randint(100, 999)}", ifsc=f"FNOP0{rng.randint(100000, 999999)}",
+                customer_id=customer.id,
+                account_type=kind,
+                currency="INR",
+                balance=balance,
+                available_balance=balance,
+                status="active",
+                branch_code=f"BR{rng.randint(100, 999)}",
+                ifsc=f"FNOP0{rng.randint(100000, 999999)}",
                 opened_on=(customer.onboarded_at or now).date(),
                 overdraft_limit=50_000 if kind == "current" else 0,
             )
@@ -320,8 +403,9 @@ async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
             pass_through = index % 13 == 5
             for day_offset in range(rng.randint(45, 120)):
                 for _ in range(rng.randint(0, 3)):
-                    booked = now - timedelta(days=day_offset, hours=rng.randint(0, 23),
-                                             minutes=rng.randint(0, 59))
+                    booked = now - timedelta(
+                        days=day_offset, hours=rng.randint(0, 23), minutes=rng.randint(0, 59)
+                    )
                     direction = rng.choices(["debit", "credit"], [0.72, 0.28])[0]
                     amount = round(rng.uniform(120, 42_000), 2)
                     if structuring and day_offset % 17 == 0:
@@ -333,22 +417,32 @@ async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
                     running_balance += amount if direction == "credit" else -amount
                     txn = Transaction(
                         reference=f"TXN{now:%Y}{txn_count:09d}",
-                        account_id=account.id, customer_id=customer.id, booked_at=booked,
-                        amount=amount, currency="INR", direction=direction,
+                        account_id=account.id,
+                        customer_id=customer.id,
+                        booked_at=booked,
+                        amount=amount,
+                        currency="INR",
+                        direction=direction,
                         channel=rng.choice(["upi", "neft", "imps", "card", "atm", "rtgs"]),
                         merchant=rng.choice(MERCHANTS) if direction == "debit" else None,
                         category=rng.choice(CATEGORIES) if direction == "debit" else "transfer",
                         description=f"{direction.title()} transaction",
                         counterparty_name=rng.choice(
-                            ["Zenith Trading FZE", "Orion Exports Ltd", "M. Sharma", "Cygnus LLC",
-                             "Helios Metals", None]),
+                            [
+                                "Zenith Trading FZE",
+                                "Orion Exports Ltd",
+                                "M. Sharma",
+                                "Cygnus LLC",
+                                "Helios Metals",
+                                None,
+                            ]
+                        ),
                         counterparty_bank=rng.choice(["HDFC", "ICICI", "Emirates NBD", "DBS", None]),
                         country=rng.choice(COUNTRIES) if rng.random() < 0.12 else "IND",
                         balance_after=round(running_balance, 2),
                         risk_score=round(rng.uniform(0, 40), 2),
                         device_id=f"DEV-{rng.randint(1000, 9999)}",
-                        ip_address=f"49.{rng.randint(1, 254)}.{rng.randint(1, 254)}."
-                                   f"{rng.randint(1, 254)}",
+                        ip_address=f"49.{rng.randint(1, 254)}.{rng.randint(1, 254)}.{rng.randint(1, 254)}",
                     )
                     session.add(txn)
                     txn_count += 1
@@ -359,25 +453,33 @@ async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
             limit = round(rng.choice([100_000, 250_000, 500_000, 1_000_000]), 2)
             used = round(rng.uniform(0, limit * 0.8), 2)
             statement = date.today().replace(day=1) - timedelta(days=1)
-            session.add(Card(
-                card_number_masked=f"****{rng.randint(1000, 9999)}",
-                card_token=hashlib.sha256(f"{customer.id}-card".encode()).hexdigest()[:32],
-                customer_id=customer.id, card_type="credit",
-                network=rng.choice(["visa", "mastercard", "rupay"]),
-                product_name=rng.choice(["Signature Rewards", "Platinum Travel", "Cashback Plus"]),
-                credit_limit=limit, available_credit=round(limit - used, 2), current_balance=used,
-                minimum_due=round(used * 0.05, 2), statement_date=statement,
-                due_date=statement + timedelta(days=20), apr=round(rng.uniform(24, 42), 2),
-                reward_points=rng.randint(0, 85_000),
-                expiry=f"{rng.randint(1, 12):02d}/{rng.randint(27, 31)}",
-                issued_on=(customer.onboarded_at or now).date(),
-            ))
+            session.add(
+                Card(
+                    card_number_masked=f"****{rng.randint(1000, 9999)}",
+                    card_token=hashlib.sha256(f"{customer.id}-card".encode()).hexdigest()[:32],
+                    customer_id=customer.id,
+                    card_type="credit",
+                    network=rng.choice(["visa", "mastercard", "rupay"]),
+                    product_name=rng.choice(["Signature Rewards", "Platinum Travel", "Cashback Plus"]),
+                    credit_limit=limit,
+                    available_credit=round(limit - used, 2),
+                    current_balance=used,
+                    minimum_due=round(used * 0.05, 2),
+                    statement_date=statement,
+                    due_date=statement + timedelta(days=20),
+                    apr=round(rng.uniform(24, 42), 2),
+                    reward_points=rng.randint(0, 85_000),
+                    expiry=f"{rng.randint(1, 12):02d}/{rng.randint(27, 31)}",
+                    issued_on=(customer.onboarded_at or now).date(),
+                )
+            )
         # Customers in the reserved band always take a loan, so the delinquency spread is
         # actually realised; a random draw over a small sample routinely produces none. The
         # band sits after the credit applicants so an application profile is never distorted
         # by a forced facility.
-        in_delinquency_band = _DELINQUENCY_BAND_START <= index < (
-            _DELINQUENCY_BAND_START + len(_DELINQUENCY_SPREAD))
+        in_delinquency_band = (
+            _DELINQUENCY_BAND_START <= index < (_DELINQUENCY_BAND_START + len(_DELINQUENCY_SPREAD))
+        )
         if in_delinquency_band or rng.random() < 0.45:
             principal = round(rng.choice([300_000, 800_000, 2_500_000, 6_000_000]), 2)
             tenure = rng.choice([36, 60, 120, 240])
@@ -392,15 +494,23 @@ async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
                 dpd = _DELINQUENCY_SPREAD[index - _DELINQUENCY_BAND_START]
             else:
                 dpd = rng.choices([0, 0, 0, 15, 45, 92], [0.72, 0.1, 0.06, 0.06, 0.04, 0.02])[0]
-            session.add(Loan(
-                loan_number=f"LN-{rng.randint(100000, 999999)}", customer_id=customer.id,
-                loan_type=rng.choice(["personal", "home", "auto", "education"]),
-                principal=principal, outstanding=round(principal * (1 - paid / tenure), 2),
-                interest_rate=rate, tenure_months=tenure, emi_amount=emi, emis_paid=paid,
-                next_due_date=date.today() + timedelta(days=rng.randint(1, 30)),
-                status="delinquent" if dpd > 30 else "active", days_past_due=dpd,
-                disbursed_on=(customer.onboarded_at or now).date(),
-            ))
+            session.add(
+                Loan(
+                    loan_number=f"LN-{rng.randint(100000, 999999)}",
+                    customer_id=customer.id,
+                    loan_type=rng.choice(["personal", "home", "auto", "education"]),
+                    principal=principal,
+                    outstanding=round(principal * (1 - paid / tenure), 2),
+                    interest_rate=rate,
+                    tenure_months=tenure,
+                    emi_amount=emi,
+                    emis_paid=paid,
+                    next_due_date=date.today() + timedelta(days=rng.randint(1, 30)),
+                    status="delinquent" if dpd > 30 else "active",
+                    days_past_due=dpd,
+                    disbursed_on=(customer.onboarded_at or now).date(),
+                )
+            )
     await session.flush()
 
     txn_count += await _seed_income_and_repayments(session, created_customers, rng, now)
@@ -409,39 +519,59 @@ async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
 
     # FAQ knowledge for the customer service agent
     faqs = [
-        ("How do I block my lost credit card?",
-         "Call 1800-200-3344 or use the FinOps app: Cards > Manage > Block. Blocking is immediate "
-         "and a replacement card is dispatched within 5 working days.", "cards",
-         ["block", "lost", "stolen", "card"]),
-        ("What is the minimum balance for a savings account?",
-         "Metro and urban branches require an average monthly balance of INR 10,000; semi-urban "
-         "INR 5,000; rural INR 2,500. Salary accounts have no minimum balance requirement.",
-         "accounts", ["minimum", "balance", "savings", "amb"]),
-        ("How long do NEFT transfers take?",
-         "NEFT settles in half-hourly batches on all working days and typically credits within "
-         "30 minutes. IMPS and UPI are instant and available 24x7.", "payments",
-         ["neft", "imps", "upi", "transfer", "time"]),
-        ("How can I get a duplicate loan statement?",
-         "Loan statements are available in the app under Loans > Statements, or by writing to "
-         "loans@finops.local from your registered email. Delivery is within 2 working days.",
-         "loans", ["statement", "loan", "duplicate"]),
-        ("What are the credit card late payment charges?",
-         "Late payment fee is INR 500 for balances up to INR 10,000, INR 750 up to INR 25,000 and "
-         "INR 1,200 above that, plus applicable finance charges from the transaction date.",
-         "cards", ["late", "payment", "charges", "fee"]),
-        ("How do I update my registered mobile number?",
-         "Visit any branch with photo ID, or use the app under Profile > Contact details with "
-         "Aadhaar OTP verification. Changes take effect after a 24-hour cooling period.",
-         "accounts", ["mobile", "number", "update", "contact"]),
-        ("What should I do about an unauthorised transaction?",
-         "Report within 3 working days for zero liability under RBI rules. Use the app "
-         "(Transactions > Report a problem) or call 1800-200-3344. A dispute case is raised and "
-         "provisional credit is issued within 10 working days.", "fraud",
-         ["unauthorised", "fraud", "dispute", "unauthorized"]),
+        (
+            "How do I block my lost credit card?",
+            "Call 1800-200-3344 or use the FinOps app: Cards > Manage > Block. Blocking is immediate "
+            "and a replacement card is dispatched within 5 working days.",
+            "cards",
+            ["block", "lost", "stolen", "card"],
+        ),
+        (
+            "What is the minimum balance for a savings account?",
+            "Metro and urban branches require an average monthly balance of INR 10,000; semi-urban "
+            "INR 5,000; rural INR 2,500. Salary accounts have no minimum balance requirement.",
+            "accounts",
+            ["minimum", "balance", "savings", "amb"],
+        ),
+        (
+            "How long do NEFT transfers take?",
+            "NEFT settles in half-hourly batches on all working days and typically credits within "
+            "30 minutes. IMPS and UPI are instant and available 24x7.",
+            "payments",
+            ["neft", "imps", "upi", "transfer", "time"],
+        ),
+        (
+            "How can I get a duplicate loan statement?",
+            "Loan statements are available in the app under Loans > Statements, or by writing to "
+            "loans@finops.local from your registered email. Delivery is within 2 working days.",
+            "loans",
+            ["statement", "loan", "duplicate"],
+        ),
+        (
+            "What are the credit card late payment charges?",
+            "Late payment fee is INR 500 for balances up to INR 10,000, INR 750 up to INR 25,000 and "
+            "INR 1,200 above that, plus applicable finance charges from the transaction date.",
+            "cards",
+            ["late", "payment", "charges", "fee"],
+        ),
+        (
+            "How do I update my registered mobile number?",
+            "Visit any branch with photo ID, or use the app under Profile > Contact details with "
+            "Aadhaar OTP verification. Changes take effect after a 24-hour cooling period.",
+            "accounts",
+            ["mobile", "number", "update", "contact"],
+        ),
+        (
+            "What should I do about an unauthorised transaction?",
+            "Report within 3 working days for zero liability under RBI rules. Use the app "
+            "(Transactions > Report a problem) or call 1800-200-3344. A dispute case is raised and "
+            "provisional credit is issued within 10 working days.",
+            "fraud",
+            ["unauthorised", "fraud", "dispute", "unauthorized"],
+        ),
     ]
     for question, answer, category, keywords in faqs:
-        session.add(FAQEntry(question=question, answer=answer, category=category,
-                             keywords=keywords))
+        session.add(FAQEntry(question=question, answer=answer, category=category, keywords=keywords))
 
     # Instrument master, price history and portfolios for investment research
     instruments = [
@@ -455,32 +585,42 @@ async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
         ("NIFTY50", "Nifty 50 Index", "Index", "Broad Market", 24500.0),
     ]
     for symbol, name, sector, industry, price in instruments:
-        session.add(Security(
-            symbol=symbol, name=name, exchange="NSE",
-            asset_class="index" if symbol == "NIFTY50" else "equity",
-            sector=sector, industry=industry, currency="INR", country="IND",
-            last_price=price, last_price_at=now,
-            fundamentals={} if symbol == "NIFTY50" else {
-                "period": "FY2025",
-                "revenue": round(price * 1e6 * rng.uniform(0.8, 1.4), 0),
-                "revenue_prior": round(price * 1e6 * rng.uniform(0.7, 1.2), 0),
-                "gross_profit": round(price * 1e6 * rng.uniform(0.25, 0.5), 0),
-                "operating_income": round(price * 1e6 * rng.uniform(0.12, 0.3), 0),
-                "net_income": round(price * 1e6 * rng.uniform(0.08, 0.2), 0),
-                "net_income_prior": round(price * 1e6 * rng.uniform(0.06, 0.18), 0),
-                "total_assets": round(price * 1e6 * rng.uniform(1.5, 3.0), 0),
-                "total_equity": round(price * 1e6 * rng.uniform(0.6, 1.6), 0),
-                "total_debt": round(price * 1e6 * rng.uniform(0.1, 1.2), 0),
-                "current_assets": round(price * 1e6 * rng.uniform(0.4, 1.0), 0),
-                "current_liabilities": round(price * 1e6 * rng.uniform(0.3, 0.8), 0),
-                "interest_expense": round(price * 1e6 * rng.uniform(0.005, 0.04), 0),
-                "pe_ratio": round(rng.uniform(14, 42), 2),
-                "price_to_book": round(rng.uniform(1.2, 9.5), 2),
-                "ev_to_ebitda": round(rng.uniform(8, 28), 2),
-                "dividend_yield": round(rng.uniform(0.2, 3.4), 2),
-                "market_cap": round(price * rng.uniform(1e9, 2e10), 0),
-            },
-        ))
+        session.add(
+            Security(
+                symbol=symbol,
+                name=name,
+                exchange="NSE",
+                asset_class="index" if symbol == "NIFTY50" else "equity",
+                sector=sector,
+                industry=industry,
+                currency="INR",
+                country="IND",
+                last_price=price,
+                last_price_at=now,
+                fundamentals={}
+                if symbol == "NIFTY50"
+                else {
+                    "period": "FY2025",
+                    "revenue": round(price * 1e6 * rng.uniform(0.8, 1.4), 0),
+                    "revenue_prior": round(price * 1e6 * rng.uniform(0.7, 1.2), 0),
+                    "gross_profit": round(price * 1e6 * rng.uniform(0.25, 0.5), 0),
+                    "operating_income": round(price * 1e6 * rng.uniform(0.12, 0.3), 0),
+                    "net_income": round(price * 1e6 * rng.uniform(0.08, 0.2), 0),
+                    "net_income_prior": round(price * 1e6 * rng.uniform(0.06, 0.18), 0),
+                    "total_assets": round(price * 1e6 * rng.uniform(1.5, 3.0), 0),
+                    "total_equity": round(price * 1e6 * rng.uniform(0.6, 1.6), 0),
+                    "total_debt": round(price * 1e6 * rng.uniform(0.1, 1.2), 0),
+                    "current_assets": round(price * 1e6 * rng.uniform(0.4, 1.0), 0),
+                    "current_liabilities": round(price * 1e6 * rng.uniform(0.3, 0.8), 0),
+                    "interest_expense": round(price * 1e6 * rng.uniform(0.005, 0.04), 0),
+                    "pe_ratio": round(rng.uniform(14, 42), 2),
+                    "price_to_book": round(rng.uniform(1.2, 9.5), 2),
+                    "ev_to_ebitda": round(rng.uniform(8, 28), 2),
+                    "dividend_yield": round(rng.uniform(0.2, 3.4), 2),
+                    "market_cap": round(price * rng.uniform(1e9, 2e10), 0),
+                },
+            )
+        )
 
     bars = 0
     for symbol, _, _, _, price in instruments:
@@ -493,45 +633,65 @@ async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
             level = max(level * (1 + drift), 1.0)
             high = level * (1 + abs(rng.gauss(0, 0.006)))
             low = level * (1 - abs(rng.gauss(0, 0.006)))
-            session.add(PriceBar(
-                symbol=symbol, bar_date=bar_date, open=round(level * (1 + rng.gauss(0, 0.003)), 2),
-                high=round(high, 2), low=round(low, 2), close=round(level, 2),
-                volume=round(rng.uniform(2e5, 9e6), 0), source="sample_generator",
-            ))
+            session.add(
+                PriceBar(
+                    symbol=symbol,
+                    bar_date=bar_date,
+                    open=round(level * (1 + rng.gauss(0, 0.003)), 2),
+                    high=round(high, 2),
+                    low=round(low, 2),
+                    close=round(level, 2),
+                    volume=round(rng.uniform(2e5, 9e6), 0),
+                    source="sample_generator",
+                )
+            )
             bars += 1
 
     portfolio = Portfolio(
-        portfolio_code="PF-BALANCED-01", customer_id=created_customers[0].id,
-        name="Balanced Growth Mandate", strategy="balanced", base_currency="INR",
-        cash_balance=480_000.0, benchmark="NIFTY50", risk_profile="moderate",
+        portfolio_code="PF-BALANCED-01",
+        customer_id=created_customers[0].id,
+        name="Balanced Growth Mandate",
+        strategy="balanced",
+        base_currency="INR",
+        cash_balance=480_000.0,
+        benchmark="NIFTY50",
+        risk_profile="moderate",
         mandate={"max_single_stock_pct": 20, "min_cash_pct": 2, "excluded_sectors": ["Tobacco"]},
     )
     session.add(portfolio)
     await session.flush()
     for symbol, _, sector, _, price in instruments[:6]:
-        session.add(Holding(
-            portfolio_id=portfolio.id, symbol=symbol,
-            quantity=round(rng.uniform(50, 900), 0), average_cost=round(price * rng.uniform(0.7, 1.1), 2),
-            currency="INR", asset_class="equity", sector=sector,
-            opened_on=date.today() - timedelta(days=rng.randint(40, 700)),
-        ))
+        session.add(
+            Holding(
+                portfolio_id=portfolio.id,
+                symbol=symbol,
+                quantity=round(rng.uniform(50, 900), 0),
+                average_cost=round(price * rng.uniform(0.7, 1.1), 2),
+                currency="INR",
+                asset_class="equity",
+                sector=sector,
+                opened_on=date.today() - timedelta(days=rng.randint(40, 700)),
+            )
+        )
 
-    session.add(KycCase(
-        case_number="KYC-2026-0001",
-        applicant_name=created_customers[1].full_name,
-        applicant_email=created_customers[1].email,
-        applicant_phone=created_customers[1].phone,
-        date_of_birth=created_customers[1].date_of_birth,
-        nationality="IN",
-        declared_address={
-            "line1": created_customers[1].address_line1,
-            "city": created_customers[1].address_city,
-            "state": created_customers[1].address_state,
-            "postcode": created_customers[1].address_postcode,
-            "country": "India",
-        },
-        status="in_progress",
-    ))
+    session.add(
+        KycCase(
+            case_number="KYC-2026-0001",
+            applicant_name=created_customers[1].full_name,
+            applicant_email=created_customers[1].email,
+            applicant_phone=created_customers[1].phone,
+            date_of_birth=created_customers[1].date_of_birth,
+            nationality="IN",
+            declared_address={
+                "line1": created_customers[1].address_line1,
+                "city": created_customers[1].address_city,
+                "state": created_customers[1].address_state,
+                "postcode": created_customers[1].address_postcode,
+                "country": "India",
+            },
+            status="in_progress",
+        )
+    )
 
     await session.commit()
     return {
@@ -549,8 +709,9 @@ async def seed_sample_banking(session: AsyncSession, *, customers: int = 24,
 
 
 # --- credit and collections sample data ---------------------------------------
-async def _seed_income_and_repayments(session: AsyncSession, customers: list[Customer],
-                                      rng: random.Random, now: datetime) -> int:
+async def _seed_income_and_repayments(
+    session: AsyncSession, customers: list[Customer], rng: random.Random, now: datetime
+) -> int:
     """Monthly salary credits and loan repayments.
 
     Affordability assessment verifies declared income against salary credits, and promise
@@ -559,10 +720,17 @@ async def _seed_income_and_repayments(session: AsyncSession, customers: list[Cus
     """
     created = 0
     for customer in customers:
-        accounts = (await session.execute(
-            select(Account).where(Account.customer_id == customer.id,
-                                  Account.account_type == "savings")
-        )).scalars().all()
+        accounts = (
+            (
+                await session.execute(
+                    select(Account).where(
+                        Account.customer_id == customer.id, Account.account_type == "savings"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
         if not accounts:
             continue
         account = accounts[0]
@@ -573,34 +741,51 @@ async def _seed_income_and_repayments(session: AsyncSession, customers: list[Cus
             declared = float(_APPLICATION_PROFILES[profile_index]["income"])
             salary = round(declared * rng.uniform(0.97, 1.03), 2)
         else:
-            salary = round(rng.choice([45_000, 65_000, 92_000, 140_000, 210_000]) *
-                           rng.uniform(0.95, 1.05), 2)
-        loans = (await session.execute(
-            select(Loan).where(Loan.customer_id == customer.id)
-        )).scalars().all()
+            salary = round(
+                rng.choice([45_000, 65_000, 92_000, 140_000, 210_000]) * rng.uniform(0.95, 1.05), 2
+            )
+        loans = (await session.execute(select(Loan).where(Loan.customer_id == customer.id))).scalars().all()
 
         for month in range(6):
             booked = now - timedelta(days=30 * month + rng.randint(0, 2))
-            session.add(Transaction(
-                reference=f"SAL{booked:%Y%m}{rng.randint(100000, 999999)}",
-                account_id=account.id, customer_id=customer.id, booked_at=booked,
-                amount=salary, currency="INR", direction="credit", channel="neft",
-                category="salary", description="Salary credit",
-                counterparty_name="Employer Payroll", country="IND",
-            ))
+            session.add(
+                Transaction(
+                    reference=f"SAL{booked:%Y%m}{rng.randint(100000, 999999)}",
+                    account_id=account.id,
+                    customer_id=customer.id,
+                    booked_at=booked,
+                    amount=salary,
+                    currency="INR",
+                    direction="credit",
+                    channel="neft",
+                    category="salary",
+                    description="Salary credit",
+                    counterparty_name="Employer Payroll",
+                    country="IND",
+                )
+            )
             created += 1
             for loan in loans:
                 # A delinquent loan stops paying; that is what makes it delinquent.
                 if loan.days_past_due > 30 and month < max(1, loan.days_past_due // 30):
                     continue
                 due = booked + timedelta(days=5)
-                session.add(Transaction(
-                    reference=f"EMI{due:%Y%m}{rng.randint(100000, 999999)}",
-                    account_id=account.id, customer_id=customer.id, booked_at=due,
-                    amount=loan.emi_amount, currency="INR", direction="debit", channel="ach",
-                    category="loan_repayment", description=f"EMI {loan.loan_number}",
-                    counterparty_name="FinOps Bank", country="IND",
-                ))
+                session.add(
+                    Transaction(
+                        reference=f"EMI{due:%Y%m}{rng.randint(100000, 999999)}",
+                        account_id=account.id,
+                        customer_id=customer.id,
+                        booked_at=due,
+                        amount=loan.emi_amount,
+                        currency="INR",
+                        direction="debit",
+                        channel="ach",
+                        category="loan_repayment",
+                        description=f"EMI {loan.loan_number}",
+                        counterparty_name="FinOps Bank",
+                        country="IND",
+                    )
+                )
                 created += 1
     await session.flush()
     return created
@@ -614,58 +799,120 @@ _DELINQUENCY_SPREAD = [12, 40, 75, 130, 220]
 #: Where that band starts. It sits immediately after the credit applicants.
 _DELINQUENCY_BAND_START = 5
 
-_APPLICATION_PROFILES = [
-    {"product": "personal_loan", "amount": 800_000, "tenure": 60, "income": 145_000,
-     "expenses": 42_000, "employment": "salaried", "months": 96, "score": 782,
-     "dpd": 0, "enquiries": 1, "utilisation": 18.0, "purpose": "Home renovation"},
-    {"product": "auto_loan", "amount": 1_200_000, "tenure": 60, "income": 190_000,
-     "expenses": 55_000, "employment": "salaried", "months": 54, "score": 741,
-     "dpd": 0, "enquiries": 2, "utilisation": 31.0, "purpose": "Vehicle purchase",
-     "collateral_type": "vehicle", "collateral_value": 1_500_000},
-    {"product": "personal_loan", "amount": 2_000_000, "tenure": 72, "income": 78_000,
-     "expenses": 38_000, "employment": "self_employed", "months": 20, "score": 668,
-     "dpd": 35, "enquiries": 7, "utilisation": 88.0, "purpose": "Business working capital"},
-    {"product": "personal_loan", "amount": 450_000, "tenure": 48, "income": 61_000,
-     "expenses": 26_000, "employment": "salaried", "months": 8, "score": 596,
-     "dpd": 75, "enquiries": 9, "utilisation": 94.0, "purpose": "Debt consolidation",
-     "write_offs": 1},
-    {"product": "home_loan", "amount": 5_500_000, "tenure": 240, "income": 320_000,
-     "expenses": 90_000, "employment": "professional", "months": 132, "score": 806,
-     "dpd": 0, "enquiries": 1, "utilisation": 9.0, "purpose": "Property purchase",
-     "collateral_type": "residential_property", "collateral_value": 7_500_000},
+_APPLICATION_PROFILES: list[dict[str, Any]] = [
+    {
+        "product": "personal_loan",
+        "amount": 800_000,
+        "tenure": 60,
+        "income": 145_000,
+        "expenses": 42_000,
+        "employment": "salaried",
+        "months": 96,
+        "score": 782,
+        "dpd": 0,
+        "enquiries": 1,
+        "utilisation": 18.0,
+        "purpose": "Home renovation",
+    },
+    {
+        "product": "auto_loan",
+        "amount": 1_200_000,
+        "tenure": 60,
+        "income": 190_000,
+        "expenses": 55_000,
+        "employment": "salaried",
+        "months": 54,
+        "score": 741,
+        "dpd": 0,
+        "enquiries": 2,
+        "utilisation": 31.0,
+        "purpose": "Vehicle purchase",
+        "collateral_type": "vehicle",
+        "collateral_value": 1_500_000,
+    },
+    {
+        "product": "personal_loan",
+        "amount": 2_000_000,
+        "tenure": 72,
+        "income": 78_000,
+        "expenses": 38_000,
+        "employment": "self_employed",
+        "months": 20,
+        "score": 668,
+        "dpd": 35,
+        "enquiries": 7,
+        "utilisation": 88.0,
+        "purpose": "Business working capital",
+    },
+    {
+        "product": "personal_loan",
+        "amount": 450_000,
+        "tenure": 48,
+        "income": 61_000,
+        "expenses": 26_000,
+        "employment": "salaried",
+        "months": 8,
+        "score": 596,
+        "dpd": 75,
+        "enquiries": 9,
+        "utilisation": 94.0,
+        "purpose": "Debt consolidation",
+        "write_offs": 1,
+    },
+    {
+        "product": "home_loan",
+        "amount": 5_500_000,
+        "tenure": 240,
+        "income": 320_000,
+        "expenses": 90_000,
+        "employment": "professional",
+        "months": 132,
+        "score": 806,
+        "dpd": 0,
+        "enquiries": 1,
+        "utilisation": 9.0,
+        "purpose": "Property purchase",
+        "collateral_type": "residential_property",
+        "collateral_value": 7_500_000,
+    },
 ]
 
 
-async def _seed_credit_book(session: AsyncSession, customers: list[Customer],
-                            rng: random.Random, now: datetime) -> dict[str, Any]:
+async def _seed_credit_book(
+    session: AsyncSession, customers: list[Customer], rng: random.Random, now: datetime
+) -> dict[str, Any]:
     """Bureau records for everyone, and a spread of applications to underwrite."""
-    applicant_ids = {
-        customers[index].id
-        for index in range(min(len(_APPLICATION_PROFILES), len(customers)))
-    }
+    applicant_ids = {customers[index].id for index in range(min(len(_APPLICATION_PROFILES), len(customers)))}
 
     bureau = 0
     for customer in customers:
         if customer.id in applicant_ids:
-            continue   # seeded below from the application profile
+            continue  # seeded below from the application profile
         base = rng.choices([790, 745, 705, 660, 610], [0.22, 0.28, 0.24, 0.16, 0.10])[0]
         score = max(300, min(900, base + rng.randint(-25, 25)))
         worst_dpd = 0 if score >= 720 else rng.choice([0, 15, 35, 65, 95])
-        session.add(BureauRecord(
-            customer_id=customer.id, bureau="CIBIL", score=score,
-            accounts_total=rng.randint(2, 11), accounts_open=rng.randint(1, 7),
-            accounts_delinquent=1 if worst_dpd >= 30 else 0,
-            worst_dpd_24m=worst_dpd, enquiries_6m=rng.randint(0, 8),
-            oldest_account_months=rng.randint(14, 190),
-            total_outstanding=round(rng.uniform(50_000, 2_400_000), 2),
-            total_sanctioned=round(rng.uniform(200_000, 4_000_000), 2),
-            revolving_utilisation_pct=round(rng.uniform(3, 95), 2),
-            monthly_obligations=round(rng.uniform(0, 60_000), 2),
-            write_offs=1 if score < 620 and rng.random() < 0.4 else 0,
-            settled_accounts=1 if score < 650 and rng.random() < 0.3 else 0,
-            pulled_at=now - timedelta(days=rng.randint(1, 20)),
-            reference=f"CIBIL-{rng.randint(10**9, 10**10 - 1)}", source="database",
-        ))
+        session.add(
+            BureauRecord(
+                customer_id=customer.id,
+                bureau="CIBIL",
+                score=score,
+                accounts_total=rng.randint(2, 11),
+                accounts_open=rng.randint(1, 7),
+                accounts_delinquent=1 if worst_dpd >= 30 else 0,
+                worst_dpd_24m=worst_dpd,
+                enquiries_6m=rng.randint(0, 8),
+                oldest_account_months=rng.randint(14, 190),
+                total_outstanding=round(rng.uniform(50_000, 2_400_000), 2),
+                total_sanctioned=round(rng.uniform(200_000, 4_000_000), 2),
+                revolving_utilisation_pct=round(rng.uniform(3, 95), 2),
+                monthly_obligations=round(rng.uniform(0, 60_000), 2),
+                write_offs=1 if score < 620 and rng.random() < 0.4 else 0,
+                settled_accounts=1 if score < 650 and rng.random() < 0.3 else 0,
+                pulled_at=now - timedelta(days=rng.randint(1, 20)),
+                reference=f"CIBIL-{rng.randint(10**9, 10**10 - 1)}",
+                source="database",
+            )
+        )
         bureau += 1
 
     applications = 0
@@ -676,50 +923,70 @@ async def _seed_credit_book(session: AsyncSession, customers: list[Customer],
         # An application is only accepted from a verified customer.
         customer.kyc_status = "verified"
         customer.date_of_birth = date(1985 + index, 4, 12)
-        session.add(BureauRecord(
-            customer_id=customer.id, bureau="CIBIL", score=profile["score"],
-            accounts_total=rng.randint(3, 9), accounts_open=rng.randint(2, 6),
-            accounts_delinquent=1 if profile["dpd"] >= 30 else 0,
-            worst_dpd_24m=profile["dpd"], enquiries_6m=profile["enquiries"],
-            oldest_account_months=max(12, profile["months"]),
-            total_outstanding=round(profile["income"] * 6, 2),
-            total_sanctioned=round(profile["income"] * 12, 2),
-            revolving_utilisation_pct=profile["utilisation"],
-            monthly_obligations=round(profile["income"] * 0.12, 2),
-            write_offs=profile.get("write_offs", 0),
-            pulled_at=now - timedelta(days=rng.randint(1, 12)),
-            reference=f"CIBIL-{rng.randint(10**9, 10**10 - 1)}", source="database",
-        ))
+        session.add(
+            BureauRecord(
+                customer_id=customer.id,
+                bureau="CIBIL",
+                score=profile["score"],
+                accounts_total=rng.randint(3, 9),
+                accounts_open=rng.randint(2, 6),
+                accounts_delinquent=1 if profile["dpd"] >= 30 else 0,
+                worst_dpd_24m=profile["dpd"],
+                enquiries_6m=profile["enquiries"],
+                oldest_account_months=max(12, profile["months"]),
+                total_outstanding=round(profile["income"] * 6, 2),
+                total_sanctioned=round(profile["income"] * 12, 2),
+                revolving_utilisation_pct=profile["utilisation"],
+                monthly_obligations=round(profile["income"] * 0.12, 2),
+                write_offs=profile.get("write_offs", 0),
+                pulled_at=now - timedelta(days=rng.randint(1, 12)),
+                reference=f"CIBIL-{rng.randint(10**9, 10**10 - 1)}",
+                source="database",
+            )
+        )
         bureau += 1
-        session.add(CreditApplication(
-            application_number=f"APP-{100001 + index}",
-            customer_id=customer.id, product=profile["product"],
-            requested_amount=float(profile["amount"]), tenure_months=profile["tenure"],
-            purpose=profile["purpose"],
-            declared_monthly_income=float(profile["income"]),
-            declared_monthly_expenses=float(profile["expenses"]),
-            employment_type=profile["employment"], employment_months=profile["months"],
-            collateral_type=profile.get("collateral_type"),
-            collateral_value=float(profile.get("collateral_value", 0)),
-            channel="branch", status="submitted",
-            submitted_at=now - timedelta(days=rng.randint(0, 6)),
-        ))
+        session.add(
+            CreditApplication(
+                application_number=f"APP-{100001 + index}",
+                customer_id=customer.id,
+                product=profile["product"],
+                requested_amount=float(profile["amount"]),
+                tenure_months=profile["tenure"],
+                purpose=profile["purpose"],
+                declared_monthly_income=float(profile["income"]),
+                declared_monthly_expenses=float(profile["expenses"]),
+                employment_type=profile["employment"],
+                employment_months=profile["months"],
+                collateral_type=profile.get("collateral_type"),
+                collateral_value=float(profile.get("collateral_value", 0)),
+                channel="branch",
+                status="submitted",
+                submitted_at=now - timedelta(days=rng.randint(0, 6)),
+            )
+        )
         applications += 1
 
     await session.flush()
     return {"bureau_records": bureau, "credit_applications": applications}
 
 
-async def _seed_collections_book(session: AsyncSession, customers: list[Customer],
-                                 now: datetime) -> dict[str, Any]:
+async def _seed_collections_book(
+    session: AsyncSession, customers: list[Customer], now: datetime
+) -> dict[str, Any]:
     """Open a case for every delinquent loan, with a spread of the controls that
     constrain treatment: a cease-contact instruction, an open dispute, a withdrawn
     consent."""
     from app.tools.collections import asset_classification, bucket_for_dpd
 
-    loans = (await session.execute(
-        select(Loan).where(Loan.days_past_due > 0).order_by(Loan.days_past_due.desc())
-    )).scalars().all()
+    loans = (
+        (
+            await session.execute(
+                select(Loan).where(Loan.days_past_due > 0).order_by(Loan.days_past_due.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     cases = 0
     # Scarcest controls first: a small seeded book must still exercise each one.
@@ -729,10 +996,14 @@ async def _seed_collections_book(session: AsyncSession, customers: list[Customer
         control = controls[index % len(controls)]
         case = DelinquencyCase(
             case_number=f"COL-{100001 + index}",
-            customer_id=loan.customer_id, facility_type="loan", facility_id=loan.id,
-            facility_reference=loan.loan_number, outstanding=loan.outstanding,
+            customer_id=loan.customer_id,
+            facility_type="loan",
+            facility_id=loan.id,
+            facility_reference=loan.loan_number,
+            outstanding=loan.outstanding,
             amount_overdue=round(loan.emi_amount * max(1, loan.days_past_due // 30), 2),
-            minimum_due=loan.emi_amount, days_past_due=loan.days_past_due,
+            minimum_due=loan.emi_amount,
+            days_past_due=loan.days_past_due,
             bucket=bucket_for_dpd(loan.days_past_due),
             asset_classification=classification["classification"],
             status="open",

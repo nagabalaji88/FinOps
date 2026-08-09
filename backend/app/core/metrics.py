@@ -71,9 +71,7 @@ vector_search_latency = Histogram(
 approvals_total = Counter(
     "finops_approvals_total", "Approval decisions", ["agent", "decision"], registry=REGISTRY
 )
-circuit_state = Gauge(
-    "finops_circuit_state", "0 closed 1 half-open 2 open", ["name"], registry=REGISTRY
-)
+circuit_state = Gauge("finops_circuit_state", "0 closed 1 half-open 2 open", ["name"], registry=REGISTRY)
 queue_depth = Gauge("finops_queue_depth", "Pending executions", ["queue"], registry=REGISTRY)
 active_executions = Gauge("finops_active_executions", "In-flight executions", registry=REGISTRY)
 process_cpu_percent = Gauge("finops_process_cpu_percent", "Process CPU percent", registry=REGISTRY)

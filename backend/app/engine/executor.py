@@ -39,6 +39,8 @@ def _aware(value: datetime | None) -> datetime | None:
     if value is not None and value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value
+
+
 tracer = get_tracer("finops.engine")
 
 bulkhead = Bulkhead("executions", settings.max_concurrent_executions)
@@ -60,9 +62,7 @@ class ExecutionEngine:
     ) -> Execution:
         from app.agents.registry import agent_registry
 
-        agent_row = (
-            await session.execute(select(Agent).where(Agent.key == agent_key))
-        ).scalar_one_or_none()
+        agent_row = (await session.execute(select(Agent).where(Agent.key == agent_key))).scalar_one_or_none()
         if agent_row is None:
             raise NotFoundError(f"Agent '{agent_key}' is not registered")
         if agent_row.availability != "implemented":
@@ -102,13 +102,19 @@ class ExecutionEngine:
         )
         await bus.publish(
             AGENT_CHANNEL,
-            {"type": "execution.queued", "execution_id": execution.id, "agent_key": agent_key,
-             "status": "queued", "created_at": execution.created_at.isoformat()},
+            {
+                "type": "execution.queued",
+                "execution_id": execution.id,
+                "agent_key": agent_key,
+                "status": "queued",
+                "created_at": execution.created_at.isoformat(),
+            },
         )
 
-        task = asyncio.create_task(self._run_detached(execution.id))
-        _running[execution.id] = task
-        task.add_done_callback(lambda _t, eid=execution.id: _running.pop(eid, None))
+        execution_id = execution.id
+        task = asyncio.create_task(self._run_detached(execution_id))
+        _running[execution_id] = task
+        task.add_done_callback(lambda _t: _running.pop(execution_id, None))
         if wait:
             await asyncio.wait_for(task, timeout=settings.execution_timeout_seconds + 30)
             await session.refresh(execution)
@@ -166,9 +172,7 @@ class ExecutionEngine:
         execution.status = "running"
         execution.started_at = _aware(execution.started_at) or datetime.now(UTC)
         if not resume:
-            execution.queue_ms = int(
-                (execution.started_at - queued_at).total_seconds() * 1000
-            )
+            execution.queue_ms = int((execution.started_at - queued_at).total_seconds() * 1000)
         await session.flush()
 
         root_span = Span(
@@ -182,8 +186,12 @@ class ExecutionEngine:
             start_time=datetime.now(UTC),
             input_payload=execution.input,
             request_id=execution.request_id,
-            attributes={"agent": execution.agent_key, "trigger": execution.trigger,
-                        "resumed": resume, "user": execution.user_email},
+            attributes={
+                "agent": execution.agent_key,
+                "trigger": execution.trigger,
+                "resumed": resume,
+                "user": execution.user_email,
+            },
         )
         session.add(root_span)
         state.root_span_id = root_span.span_id
@@ -192,11 +200,15 @@ class ExecutionEngine:
 
         await emitter.emit(
             EventType.EXECUTION_STARTED if not resume else "execution.resumed",
-            {"agent_key": execution.agent_key, "input": execution.input,
-             "model": state.model, "resumed": resume,
-             "graph": [n.key for n in DEFAULT_NODES]},
-            node=None, log_message=f"Execution {'resumed' if resume else 'started'} for "
-                                   f"{execution.agent_key}",
+            {
+                "agent_key": execution.agent_key,
+                "input": execution.input,
+                "model": state.model,
+                "resumed": resume,
+                "graph": [n.key for n in DEFAULT_NODES],
+            },
+            node=None,
+            log_message=f"Execution {'resumed' if resume else 'started'} for {execution.agent_key}",
         )
         await session.commit()
 
@@ -220,12 +232,14 @@ class ExecutionEngine:
             execution.checkpoint = state.to_checkpoint()
             flag_modified(execution, "checkpoint")
             execution.status = status
-            await self._finalise(session, execution, state, root_span, status, None, None,
-                                 started_perf)
+            await self._finalise(session, execution, state, root_span, status, None, None, started_perf)
             await emitter.emit(
                 "execution.suspended",
-                {"approval_id": pause.approval.approval_id, "node": pause.approval.node,
-                 "title": pause.approval.title},
+                {
+                    "approval_id": pause.approval.approval_id,
+                    "node": pause.approval.node,
+                    "title": pause.approval.title,
+                },
                 log_message=f"Execution suspended awaiting approval {pause.approval.approval_id}",
             )
             await session.commit()
@@ -253,16 +267,19 @@ class ExecutionEngine:
             active_executions.dec()
             ambient_session.reset(ambient_token)
 
-        await self._finalise(session, execution, state, root_span, status, error_message,
-                             error_type, started_perf)
+        await self._finalise(
+            session, execution, state, root_span, status, error_message, error_type, started_perf
+        )
         if status == "succeeded":
             await emitter.emit(
                 EventType.EXECUTION_COMPLETED,
-                {"latency_ms": execution.latency_ms, "cost_usd": round(state.cost_usd, 6),
-                 "tokens": state.tokens_input + state.tokens_output,
-                 "response": state.final_response},
-                log_message=f"Execution completed in {execution.latency_ms}ms "
-                            f"(${state.cost_usd:.4f})",
+                {
+                    "latency_ms": execution.latency_ms,
+                    "cost_usd": round(state.cost_usd, 6),
+                    "tokens": state.tokens_input + state.tokens_output,
+                    "response": state.final_response,
+                },
+                log_message=f"Execution completed in {execution.latency_ms}ms (${state.cost_usd:.4f})",
             )
         else:
             await emitter.emit(
@@ -332,21 +349,29 @@ class ExecutionEngine:
         root_span.duration_ms = latency_ms
         root_span.status = {"succeeded": "ok", "awaiting_approval": "running"}.get(status, "error")
         root_span.error = error
-        root_span.output_payload = {"response": (state.final_response or "")[:4000],
-                                    "status": status}
+        root_span.output_payload = {"response": (state.final_response or "")[:4000], "status": status}
         root_span.tokens_input = state.tokens_input
         root_span.tokens_output = state.tokens_output
         root_span.cost_usd = round(state.cost_usd, 6)
-        root_span.attributes = {**(root_span.attributes or {}), "node_path": state.node_path,
-                                "llm_calls": state.llm_calls, "tool_calls": state.tool_calls}
+        root_span.attributes = {
+            **(root_span.attributes or {}),
+            "node_path": state.node_path,
+            "llm_calls": state.llm_calls,
+            "tool_calls": state.tool_calls,
+        }
         current = queue_depth.labels(queue="executions")._value.get()  # type: ignore[attr-defined]
         queue_depth.labels(queue="executions").set(max(current - 1, 0))
         await session.flush()
         await bus.publish(
             AGENT_CHANNEL,
-            {"type": "execution.updated", "execution_id": execution.id,
-             "agent_key": execution.agent_key, "status": status,
-             "latency_ms": execution.latency_ms, "cost_usd": execution.cost_usd},
+            {
+                "type": "execution.updated",
+                "execution_id": execution.id,
+                "agent_key": execution.agent_key,
+                "status": status,
+                "latency_ms": execution.latency_ms,
+                "cost_usd": execution.cost_usd,
+            },
         )
 
     async def resume_after_approval(
@@ -387,7 +412,7 @@ class ExecutionEngine:
 
         task = asyncio.create_task(self._resume_detached(execution_id))
         _running[execution_id] = task
-        task.add_done_callback(lambda _t, eid=execution_id: _running.pop(eid, None))
+        task.add_done_callback(lambda _t: _running.pop(execution_id, None))
         return execution
 
     async def _resume_detached(self, execution_id: str) -> None:

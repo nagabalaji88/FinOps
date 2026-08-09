@@ -99,8 +99,7 @@ class AnthropicProvider(LLMProvider):
             payload["stop_sequences"] = stop
         if tools:
             payload["tools"] = [
-                {"name": t.name, "description": t.description, "input_schema": t.parameters}
-                for t in tools
+                {"name": t.name, "description": t.description, "input_schema": t.parameters} for t in tools
             ]
         return payload
 
@@ -120,8 +119,9 @@ class AnthropicProvider(LLMProvider):
         self._require()
         payload = self._payload(model, messages, tools, temperature, max_tokens, top_p, stop)
         if json_mode and not tools:
-            payload["system"] = (payload.get("system", "") +
-                                 "\n\nRespond with a single valid JSON object and nothing else.").strip()
+            payload["system"] = (
+                payload.get("system", "") + "\n\nRespond with a single valid JSON object and nothing else."
+            ).strip()
         if extra:
             payload.update(extra)
         started = time.perf_counter()
@@ -145,8 +145,11 @@ class AnthropicProvider(LLMProvider):
                 text_parts.append(block.get("text", ""))
             elif block.get("type") == "tool_use":
                 tool_calls.append(
-                    ToolCall(id=block.get("id", str(uuid.uuid4())), name=block.get("name", ""),
-                             arguments=block.get("input") or {})
+                    ToolCall(
+                        id=block.get("id", str(uuid.uuid4())),
+                        name=block.get("name", ""),
+                        arguments=block.get("input") or {},
+                    )
                 )
         usage_raw = data.get("usage") or {}
         usage = Usage(
@@ -176,8 +179,9 @@ class AnthropicProvider(LLMProvider):
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         self._require()
-        payload = self._payload(model, messages, tools, temperature, max_tokens,
-                                kwargs.get("top_p"), kwargs.get("stop"))
+        payload = self._payload(
+            model, messages, tools, temperature, max_tokens, kwargs.get("top_p"), kwargs.get("stop")
+        )
         payload["stream"] = True
         started = time.perf_counter()
         text_parts: list[str] = []
@@ -188,13 +192,14 @@ class AnthropicProvider(LLMProvider):
         request_id: str | None = None
 
         async with http_client().stream(
-            "POST", f"{settings.anthropic_base_url}/v1/messages",
-            headers=self._headers(), json=payload,
+            "POST",
+            f"{settings.anthropic_base_url}/v1/messages",
+            headers=self._headers(),
+            json=payload,
         ) as resp:
             if resp.status_code >= 400:
                 body = (await resp.aread()).decode()[:1200]
-                raise ProviderError(f"Anthropic stream failed {resp.status_code}",
-                                    details={"body": body})
+                raise ProviderError(f"Anthropic stream failed {resp.status_code}", details={"body": body})
             request_id = resp.headers.get("request-id")
             async for line in resp.aiter_lines():
                 if not line.startswith("data:"):
@@ -225,12 +230,18 @@ class AnthropicProvider(LLMProvider):
                         args = json.loads(current_tool["json"] or "{}")
                     except json.JSONDecodeError:
                         args = {"_raw": current_tool["json"]}
-                    tool_calls.append(ToolCall(id=current_tool["id"] or str(uuid.uuid4()),
-                                               name=current_tool["name"] or "", arguments=args))
+                    tool_calls.append(
+                        ToolCall(
+                            id=current_tool["id"] or str(uuid.uuid4()),
+                            name=current_tool["name"] or "",
+                            arguments=args,
+                        )
+                    )
                     current_tool = None
                 elif etype == "message_delta":
-                    usage.output_tokens = int((event.get("usage") or {}).get("output_tokens",
-                                                                            usage.output_tokens))
+                    usage.output_tokens = int(
+                        (event.get("usage") or {}).get("output_tokens", usage.output_tokens)
+                    )
                     stop_reason = (event.get("delta") or {}).get("stop_reason") or stop_reason
 
         content = "".join(text_parts)
@@ -239,22 +250,31 @@ class AnthropicProvider(LLMProvider):
         yield StreamChunk(
             done=True,
             response=LLMResponse(
-                content=content, model=model, provider=self.name, usage=usage,
-                tool_calls=tool_calls, finish_reason=stop_reason,
-                latency_ms=(time.perf_counter() - started) * 1000, request_id=request_id,
+                content=content,
+                model=model,
+                provider=self.name,
+                usage=usage,
+                tool_calls=tool_calls,
+                finish_reason=stop_reason,
+                latency_ms=(time.perf_counter() - started) * 1000,
+                request_id=request_id,
             ),
         )
 
     async def health(self) -> dict[str, Any]:
-        info: dict[str, Any] = {"provider": self.name, "configured": self.configured,
-                                "base_url": settings.anthropic_base_url}
+        info: dict[str, Any] = {
+            "provider": self.name,
+            "configured": self.configured,
+            "base_url": settings.anthropic_base_url,
+        }
         if not self.configured:
             info["status"] = "not_configured"
             return info
         try:
             started = time.perf_counter()
-            resp = await http_client().get(f"{settings.anthropic_base_url}/v1/models",
-                                           headers=self._headers(), timeout=8.0)
+            resp = await http_client().get(
+                f"{settings.anthropic_base_url}/v1/models", headers=self._headers(), timeout=8.0
+            )
             info["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
             info["status"] = "healthy" if resp.status_code < 400 else "degraded"
             info["http_status"] = resp.status_code

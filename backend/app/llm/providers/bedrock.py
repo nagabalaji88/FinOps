@@ -72,8 +72,7 @@ def sigv4_headers(
     )
     credential_scope = f"{date_stamp}/{region}/{service}/aws4_request"
     string_to_sign = "\n".join(
-        [ALGORITHM, amz_date, credential_scope,
-         hashlib.sha256(canonical_request.encode()).hexdigest()]
+        [ALGORITHM, amz_date, credential_scope, hashlib.sha256(canonical_request.encode()).hexdigest()]
     )
     signature = hmac.new(
         _signing_key(secret_key, date_stamp, region, service), string_to_sign.encode(), hashlib.sha256
@@ -155,14 +154,14 @@ class BedrockProvider(LLMProvider):
         )
         started = time.perf_counter()
         try:
-            resp = await http_client().post(f"https://{self.host}{path}", headers=headers,
-                                            content=payload)
+            resp = await http_client().post(f"https://{self.host}{path}", headers=headers, content=payload)
         except httpx.HTTPError as exc:
             raise ProviderError(f"Bedrock transport error: {exc}") from exc
         latency = (time.perf_counter() - started) * 1000
         if resp.status_code >= 400:
-            raise ProviderError(f"Bedrock returned {resp.status_code}",
-                                details={"body": resp.text[:1200], "path": path})
+            raise ProviderError(
+                f"Bedrock returned {resp.status_code}", details={"body": resp.text[:1200], "path": path}
+            )
         return resp.json(), latency, resp.headers.get("x-amzn-requestid")
 
     async def chat(
@@ -210,22 +209,30 @@ class BedrockProvider(LLMProvider):
         blocks = ((data.get("output") or {}).get("message") or {}).get("content", [])
         text_parts = [b["text"] for b in blocks if "text" in b]
         tool_calls = [
-            ToolCall(id=b["toolUse"].get("toolUseId", str(uuid.uuid4())),
-                     name=b["toolUse"].get("name", ""), arguments=b["toolUse"].get("input") or {})
+            ToolCall(
+                id=b["toolUse"].get("toolUseId", str(uuid.uuid4())),
+                name=b["toolUse"].get("name", ""),
+                arguments=b["toolUse"].get("input") or {},
+            )
             for b in blocks
             if "toolUse" in b
         ]
         usage_raw = data.get("usage") or {}
         content = "".join(text_parts)
         usage = Usage(
-            input_tokens=int(usage_raw.get("inputTokens", 0)) or
-            sum(estimate_tokens(m.content or "") for m in messages),
+            input_tokens=int(usage_raw.get("inputTokens", 0))
+            or sum(estimate_tokens(m.content or "") for m in messages),
             output_tokens=int(usage_raw.get("outputTokens", 0)) or estimate_tokens(content),
             cached_input_tokens=int(usage_raw.get("cacheReadInputTokens", 0) or 0),
         )
         return LLMResponse(
-            content=content, model=model, provider=self.name, usage=usage, tool_calls=tool_calls,
-            finish_reason=data.get("stopReason", "end_turn"), latency_ms=latency,
+            content=content,
+            model=model,
+            provider=self.name,
+            usage=usage,
+            tool_calls=tool_calls,
+            finish_reason=data.get("stopReason", "end_turn"),
+            latency_ms=latency,
             request_id=request_id,
         )
 
@@ -242,14 +249,21 @@ class BedrockProvider(LLMProvider):
             tokens += int(data.get("inputTextTokenCount", estimate_tokens(text)))
             total_latency += latency
         return EmbeddingResult(
-            vectors=vectors, model=model, provider=self.name,
+            vectors=vectors,
+            model=model,
+            provider=self.name,
             dimensions=len(vectors[0]) if vectors else 0,
-            usage=Usage(input_tokens=tokens), latency_ms=total_latency,
+            usage=Usage(input_tokens=tokens),
+            latency_ms=total_latency,
         )
 
     async def health(self) -> dict[str, Any]:
-        info: dict[str, Any] = {"provider": self.name, "configured": self.configured,
-                                "region": settings.aws_region, "endpoint": self.host}
+        info: dict[str, Any] = {
+            "provider": self.name,
+            "configured": self.configured,
+            "region": settings.aws_region,
+            "endpoint": self.host,
+        }
         if not self.configured:
             info["status"] = "not_configured"
             return info
@@ -259,10 +273,14 @@ class BedrockProvider(LLMProvider):
             host = f"bedrock.{settings.aws_region}.amazonaws.com"
             path = "/foundation-models"
             headers = sigv4_headers(
-                method="GET", host=host, path=path, region=settings.aws_region,
+                method="GET",
+                host=host,
+                path=path,
+                region=settings.aws_region,
                 access_key=settings.aws_access_key_id or "",
                 secret_key=settings.aws_secret_access_key or "",
-                session_token=os.getenv("AWS_SESSION_TOKEN"), payload=b"",
+                session_token=os.getenv("AWS_SESSION_TOKEN"),
+                payload=b"",
             )
             started = time.perf_counter()
             resp = await http_client().get(f"https://{host}{path}", headers=headers, timeout=8.0)

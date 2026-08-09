@@ -23,9 +23,18 @@ os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_db_path}"
 os.environ["JWT_SECRET"] = "test-secret-key-for-suite-only"
 os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = "TestPassword!2026"
 # Ensure no real provider is reachable from the suite.
-for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "AZURE_OPENAI_API_KEY",
-            "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "MISTRAL_API_KEY", "DEEPSEEK_API_KEY",
-            "TOGETHER_API_KEY", "OLLAMA_BASE_URL"):
+for var in (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "MISTRAL_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "TOGETHER_API_KEY",
+    "OLLAMA_BASE_URL",
+):
     os.environ.pop(var, None)
 # The scripted provider answers with canned agent responses, which is meaningless as a
 # rail classifier. The suite therefore runs NeMo's deterministic rails only; the LLM-backed
@@ -65,18 +74,25 @@ class ScriptedProvider(LLMProvider):
 
     def queue_text(self, content: str) -> None:
         self.script.append(
-            LLMResponse(content=content, model=TEST_MODEL, provider=self.name,
-                        usage=Usage(input_tokens=120, output_tokens=40), latency_ms=5.0)
+            LLMResponse(
+                content=content,
+                model=TEST_MODEL,
+                provider=self.name,
+                usage=Usage(input_tokens=120, output_tokens=40),
+                latency_ms=5.0,
+            )
         )
 
     def queue_tool_call(self, name: str, arguments: dict[str, Any]) -> None:
         self.script.append(
             LLMResponse(
-                content="", model=TEST_MODEL, provider=self.name,
+                content="",
+                model=TEST_MODEL,
+                provider=self.name,
                 usage=Usage(input_tokens=100, output_tokens=30),
-                tool_calls=[ToolCall(id=f"call_{uuid.uuid4().hex[:8]}", name=name,
-                                     arguments=arguments)],
-                finish_reason="tool_use", latency_ms=5.0,
+                tool_calls=[ToolCall(id=f"call_{uuid.uuid4().hex[:8]}", name=name, arguments=arguments)],
+                finish_reason="tool_use",
+                latency_ms=5.0,
             )
         )
 
@@ -84,15 +100,21 @@ class ScriptedProvider(LLMProvider):
         self.script.clear()
         self.calls.clear()
 
-    async def chat(self, *, model: str, messages: list[Message],
-                   tools: list[ToolSchema] | None = None, **kwargs: Any) -> LLMResponse:
-        self.calls.append({"model": model, "messages": len(messages),
-                           "tools": [t.name for t in (tools or [])]})
+    async def chat(
+        self, *, model: str, messages: list[Message], tools: list[ToolSchema] | None = None, **kwargs: Any
+    ) -> LLMResponse:
+        self.calls.append(
+            {"model": model, "messages": len(messages), "tools": [t.name for t in (tools or [])]}
+        )
         if self.script:
             return self.script.pop(0)
-        return LLMResponse(content="Scripted default response.", model=TEST_MODEL,
-                           provider=self.name, usage=Usage(input_tokens=50, output_tokens=10),
-                           latency_ms=4.0)
+        return LLMResponse(
+            content="Scripted default response.",
+            model=TEST_MODEL,
+            provider=self.name,
+            usage=Usage(input_tokens=50, output_tokens=10),
+            latency_ms=4.0,
+        )
 
 
 scripted_provider = ScriptedProvider()
@@ -125,9 +147,15 @@ async def _database() -> AsyncIterator[None]:
 def _register_scripted_model() -> Any:
     """Expose the scripted provider through the router for the duration of a test."""
     CATALOG[TEST_MODEL] = ModelSpec(
-        id=TEST_MODEL, provider="scripted", display_name="Scripted Test Model",  # type: ignore[arg-type]
-        family="test", context_window=100_000, max_output_tokens=8000,
-        input_price_per_mtok=1.0, output_price_per_mtok=2.0, tier="balanced",
+        id=TEST_MODEL,
+        provider="scripted",
+        display_name="Scripted Test Model",  # type: ignore[arg-type]
+        family="test",
+        context_window=100_000,
+        max_output_tokens=8000,
+        input_price_per_mtok=1.0,
+        output_price_per_mtok=2.0,
+        tier="balanced",
     )
     model_router._providers["scripted"] = scripted_provider  # noqa: SLF001
     scripted_provider.reset()
@@ -151,16 +179,18 @@ async def client() -> AsyncIterator[AsyncClient]:
 
 @pytest_asyncio.fixture
 async def admin_token(client: AsyncClient) -> str:
-    response = await client.post("/api/v1/auth/login", json={
-        "email": "admin@finops.local", "password": "TestPassword!2026"})
+    response = await client.post(
+        "/api/v1/auth/login", json={"email": "admin@finops.local", "password": "TestPassword!2026"}
+    )
     assert response.status_code == 200, response.text
     return response.json()["access_token"]
 
 
 @pytest_asyncio.fixture
 async def approver_token(client: AsyncClient) -> str:
-    response = await client.post("/api/v1/auth/login", json={
-        "email": "approver@finops.local", "password": "TestPassword!2026"})
+    response = await client.post(
+        "/api/v1/auth/login", json={"email": "approver@finops.local", "password": "TestPassword!2026"}
+    )
     assert response.status_code == 200, response.text
     return response.json()["access_token"]
 

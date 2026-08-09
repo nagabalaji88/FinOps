@@ -123,8 +123,9 @@ class ToolRegistry:
     def get(self, name: str) -> Tool:
         tool = self._tools.get(name)
         if tool is None:
-            raise NotFoundError(f"Tool '{name}' is not registered",
-                                details={"available": sorted(self._tools)})
+            raise NotFoundError(
+                f"Tool '{name}' is not registered", details={"available": sorted(self._tools)}
+            )
         return tool
 
     def has(self, name: str) -> bool:
@@ -148,7 +149,9 @@ class ToolRegistry:
             args = tool.args_model(**(arguments or {}))
         except PydanticValidationError as exc:
             result = ToolResult(
-                ok=False, tool=name, error=f"Invalid arguments: {exc.errors()}",
+                ok=False,
+                tool=name,
+                error=f"Invalid arguments: {exc.errors()}",
                 latency_ms=(time.perf_counter() - started) * 1000,
             )
             tool_calls_total.labels(name, "invalid_args").inc()
@@ -186,23 +189,33 @@ class ToolRegistry:
             return result
         except TimeoutError:
             latency = (time.perf_counter() - started) * 1000
-            result = ToolResult(ok=False, tool=name, error=f"Tool timed out after "
-                                f"{tool.timeout_seconds}s", latency_ms=latency, retries=retries)
+            result = ToolResult(
+                ok=False,
+                tool=name,
+                error=f"Tool timed out after {tool.timeout_seconds}s",
+                latency_ms=latency,
+                retries=retries,
+            )
             tool_calls_total.labels(name, "timeout").inc()
             await self._record(tool, result, "timeout")
             return result
         except AppError as exc:
             latency = (time.perf_counter() - started) * 1000
-            result = ToolResult(ok=False, tool=name, error=exc.message, latency_ms=latency,
-                                retries=retries, metadata={"code": exc.code, **exc.details})
+            result = ToolResult(
+                ok=False,
+                tool=name,
+                error=exc.message,
+                latency_ms=latency,
+                retries=retries,
+                metadata={"code": exc.code, **exc.details},
+            )
             tool_calls_total.labels(name, "error").inc()
             await self._record(tool, result, "degraded")
             return result
         except Exception as exc:
             latency = (time.perf_counter() - started) * 1000
             log.exception("tool_failed", tool=name, error=str(exc))
-            result = ToolResult(ok=False, tool=name, error=str(exc), latency_ms=latency,
-                                retries=retries)
+            result = ToolResult(ok=False, tool=name, error=str(exc), latency_ms=latency, retries=retries)
             tool_calls_total.labels(name, "error").inc()
             await self._record(tool, result, "unhealthy")
             return result

@@ -58,8 +58,7 @@ def _scenario_section(result: ScenarioResult) -> list[str]:
         excerpt = result.observed.final_response.strip()
         if len(excerpt) > 600:
             excerpt = excerpt[:600].rstrip() + " …"
-        lines += ["", "<details><summary>Response</summary>", "", "```text", excerpt, "```", "",
-                  "</details>"]
+        lines += ["", "<details><summary>Response</summary>", "", "```text", excerpt, "```", "", "</details>"]
     lines.append("")
     return lines
 
@@ -99,7 +98,12 @@ def to_markdown(report: ValidationReport) -> str:
         )
     lines.append("")
 
-    lines += ["### Scenario index", "", "| ID | Agent | Scenario | Verdict | Checks |", "|---|---|---|---|---|"]
+    lines += [
+        "### Scenario index",
+        "",
+        "| ID | Agent | Scenario | Verdict | Checks |",
+        "|---|---|---|---|---|",
+    ]
     for result in report.results:
         passed = sum(1 for c in result.checks if c.outcome == "pass")
         lines.append(
@@ -194,8 +198,7 @@ def format_live(
         body = _field("output", observed.final_response, width)
         lines += body[:max_output_lines]
         if len(body) > max_output_lines:
-            lines.append(" " * LABEL_WIDTH
-                         + f"... ({len(observed.final_response)} characters in total)")
+            lines.append(" " * LABEL_WIDTH + f"... ({len(observed.final_response)} characters in total)")
     return "\n".join(lines)
 
 

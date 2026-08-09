@@ -45,41 +45,51 @@ async def _agent_metrics(session: SessionDep, agent_key: str) -> dict[str, Any]:
     ).all()
     status_map = {s: c for s, c in statuses}
     total_all = int(
-        (await session.execute(
-            select(func.count(Execution.id)).where(Execution.agent_key == agent_key)
-        )).scalar_one()
+        (
+            await session.execute(select(func.count(Execution.id)).where(Execution.agent_key == agent_key))
+        ).scalar_one()
     )
     succeeded = status_map.get("succeeded", 0)
     failed = status_map.get("failed", 0) + status_map.get("timeout", 0)
     finished = succeeded + failed
     last = (
         await session.execute(
-            select(Execution).where(Execution.agent_key == agent_key)
-            .order_by(Execution.created_at.desc()).limit(1)
+            select(Execution)
+            .where(Execution.agent_key == agent_key)
+            .order_by(Execution.created_at.desc())
+            .limit(1)
         )
     ).scalar_one_or_none()
     running = (
         await session.execute(
-            select(Execution).where(
+            select(Execution)
+            .where(
                 Execution.agent_key == agent_key,
                 Execution.status.in_(["running", "queued", "awaiting_approval"]),
-            ).order_by(Execution.created_at.desc()).limit(1)
+            )
+            .order_by(Execution.created_at.desc())
+            .limit(1)
         )
     ).scalar_one_or_none()
     open_incidents = int(
-        (await session.execute(
-            select(func.count(Execution.id)).where(
-                Execution.agent_key == agent_key, Execution.status.in_(["failed", "timeout"]),
-                Execution.created_at >= day_start,
+        (
+            await session.execute(
+                select(func.count(Execution.id)).where(
+                    Execution.agent_key == agent_key,
+                    Execution.status.in_(["failed", "timeout"]),
+                    Execution.created_at >= day_start,
+                )
             )
-        )).scalar_one()
+        ).scalar_one()
     )
     pending_approvals = int(
-        (await session.execute(
-            select(func.count(Approval.id)).where(
-                Approval.agent_key == agent_key, Approval.status == "pending"
+        (
+            await session.execute(
+                select(func.count(Approval.id)).where(
+                    Approval.agent_key == agent_key, Approval.status == "pending"
+                )
             )
-        )).scalar_one()
+        ).scalar_one()
     )
     error_rate = round(failed / finished * 100, 2) if finished else 0.0
     health = "healthy"
@@ -104,14 +114,21 @@ async def _agent_metrics(session: SessionDep, agent_key: str) -> dict[str, Any]:
         "pending_approvals": pending_approvals,
         "health": health,
         "current_execution": {
-            "id": running.id, "status": running.status,
+            "id": running.id,
+            "status": running.status,
             "started_at": running.started_at.isoformat() if running.started_at else None,
-        } if running else None,
+        }
+        if running
+        else None,
         "last_execution": {
-            "id": last.id, "status": last.status, "latency_ms": last.latency_ms,
+            "id": last.id,
+            "status": last.status,
+            "latency_ms": last.latency_ms,
             "cost_usd": last.cost_usd,
             "finished_at": last.finished_at.isoformat() if last.finished_at else None,
-        } if last else None,
+        }
+        if last
+        else None,
     }
 
 
@@ -164,7 +181,8 @@ async def list_agents(
     for agent in agents:
         metrics = (
             await _agent_metrics(session, agent.key)
-            if include_metrics and agent.availability == "implemented" else {}
+            if include_metrics and agent.availability == "implemented"
+            else {}
         )
         out.append(_serialise_agent(agent, metrics))
     return out
@@ -185,9 +203,7 @@ async def roadmap(principal: PrincipalDep) -> list[dict[str, Any]]:
 @router.get("/{agent_key}")
 async def get_agent(agent_key: str, session: SessionDep, principal: PrincipalDep) -> dict[str, Any]:
     principal.require(Permission.AGENT_READ)
-    agent = (
-        await session.execute(select(Agent).where(Agent.key == agent_key))
-    ).scalar_one_or_none()
+    agent = (await session.execute(select(Agent).where(Agent.key == agent_key))).scalar_one_or_none()
     if agent is None:
         raise NotFoundError(f"Agent '{agent_key}' not found")
     metrics = await _agent_metrics(session, agent_key) if agent.availability == "implemented" else {}
@@ -195,9 +211,13 @@ async def get_agent(agent_key: str, session: SessionDep, principal: PrincipalDep
     payload["config"] = agent.config or {}
     payload["tool_details"] = [
         {
-            "name": t.name, "description": t.description, "category": t.category,
-            "requires_approval": t.requires_approval, "writes_data": t.writes_data,
-            "timeout_seconds": t.timeout_seconds, "schema": t.json_schema,
+            "name": t.name,
+            "description": t.description,
+            "category": t.category,
+            "requires_approval": t.requires_approval,
+            "writes_data": t.writes_data,
+            "timeout_seconds": t.timeout_seconds,
+            "schema": t.json_schema,
         }
         for t in tool_registry.by_names(agent.tools or [])
     ]
@@ -229,9 +249,15 @@ async def execute_agent(
         request_id=request.headers.get("x-request-id"),
         wait=payload.wait,
     )
-    await write_audit(session, principal=principal, action="agent.execute", resource_type="agent",
-                      resource_id=agent_key, details={"execution_id": execution.id},
-                      request=request)
+    await write_audit(
+        session,
+        principal=principal,
+        action="agent.execute",
+        resource_type="agent",
+        resource_id=agent_key,
+        details={"execution_id": execution.id},
+        request=request,
+    )
     return {
         "execution_id": execution.id,
         "agent_key": agent_key,
@@ -256,20 +282,27 @@ async def change_lifecycle(
     principal: PrincipalDep,
 ) -> dict[str, Any]:
     principal.require(Permission.AGENT_LIFECYCLE)
-    agent = (
-        await session.execute(select(Agent).where(Agent.key == agent_key))
-    ).scalar_one_or_none()
+    agent = (await session.execute(select(Agent).where(Agent.key == agent_key))).scalar_one_or_none()
     if agent is None:
         raise NotFoundError(f"Agent '{agent_key}' not found")
     mapping = {"pause": "paused", "resume": "active", "enable": "active", "disable": "disabled"}
     if payload.action not in mapping:
         raise ValidationError("Unknown lifecycle action", details={"valid": sorted(mapping)})
     agent.lifecycle_state = mapping[payload.action]
-    await write_audit(session, principal=principal, action=f"agent.{payload.action}",
-                      resource_type="agent", resource_id=agent_key, severity="warning",
-                      details={"reason": payload.reason}, request=request)
-    await bus.publish(AGENT_CHANNEL, {"type": "agent.lifecycle", "agent_key": agent_key,
-                                      "lifecycle_state": agent.lifecycle_state})
+    await write_audit(
+        session,
+        principal=principal,
+        action=f"agent.{payload.action}",
+        resource_type="agent",
+        resource_id=agent_key,
+        severity="warning",
+        details={"reason": payload.reason},
+        request=request,
+    )
+    await bus.publish(
+        AGENT_CHANNEL,
+        {"type": "agent.lifecycle", "agent_key": agent_key, "lifecycle_state": agent.lifecycle_state},
+    )
     return {"agent_key": agent_key, "lifecycle_state": agent.lifecycle_state}
 
 
@@ -310,9 +343,7 @@ async def update_agent_config(
     principal: PrincipalDep,
 ) -> dict[str, Any]:
     principal.require(Permission.AGENT_WRITE)
-    agent = (
-        await session.execute(select(Agent).where(Agent.key == agent_key))
-    ).scalar_one_or_none()
+    agent = (await session.execute(select(Agent).where(Agent.key == agent_key))).scalar_one_or_none()
     if agent is None:
         raise NotFoundError(f"Agent '{agent_key}' not found")
     if agent.availability != "implemented":
@@ -321,9 +352,10 @@ async def update_agent_config(
     updates = payload.model_dump(exclude_none=True, exclude={"changelog"})
     unknown_tools = [t for t in updates.get("tools", []) if not tool_registry.has(t)]
     if unknown_tools:
-        raise ValidationError("Unknown tools", details={"unknown": unknown_tools,
-                                                        "available": [t.name for t in
-                                                                      tool_registry.all()]})
+        raise ValidationError(
+            "Unknown tools",
+            details={"unknown": unknown_tools, "available": [t.name for t in tool_registry.all()]},
+        )
     config = {**(agent.config or {}), **updates}
     agent.config = config
     if "name" in updates:
@@ -344,43 +376,62 @@ async def update_agent_config(
     # Take the next unused version number: after a rollback the agent's current version is
     # an older one, so incrementing it would collide with an existing row.
     highest = int(
-        (await session.execute(
-            select(func.max(AgentVersion.version)).where(AgentVersion.agent_id == agent.id)
-        )).scalar_one() or agent.version
+        (
+            await session.execute(
+                select(func.max(AgentVersion.version)).where(AgentVersion.agent_id == agent.id)
+            )
+        ).scalar_one()
+        or agent.version
     )
     agent.version = highest + 1
-    session.add(AgentVersion(agent_id=agent.id, version=agent.version, config=config,
-                             changelog=payload.changelog, published=False))
+    session.add(
+        AgentVersion(
+            agent_id=agent.id,
+            version=agent.version,
+            config=config,
+            changelog=payload.changelog,
+            published=False,
+        )
+    )
     agent_registry.apply_override(agent_key, config)
-    await write_audit(session, principal=principal, action="agent.config.updated",
-                      resource_type="agent", resource_id=agent_key,
-                      details={"version": agent.version, "fields": sorted(updates)},
-                      request=request)
-    return {"agent_key": agent_key, "version": agent.version, "config": config,
-            "published": False}
+    await write_audit(
+        session,
+        principal=principal,
+        action="agent.config.updated",
+        resource_type="agent",
+        resource_id=agent_key,
+        details={"version": agent.version, "fields": sorted(updates)},
+        request=request,
+    )
+    return {"agent_key": agent_key, "version": agent.version, "config": config, "published": False}
 
 
 @router.get("/{agent_key}/versions")
-async def list_versions(agent_key: str, session: SessionDep,
-                        principal: PrincipalDep) -> list[dict[str, Any]]:
+async def list_versions(agent_key: str, session: SessionDep, principal: PrincipalDep) -> list[dict[str, Any]]:
     principal.require(Permission.AGENT_READ)
-    agent = (
-        await session.execute(select(Agent).where(Agent.key == agent_key))
-    ).scalar_one_or_none()
+    agent = (await session.execute(select(Agent).where(Agent.key == agent_key))).scalar_one_or_none()
     if agent is None:
         raise NotFoundError(f"Agent '{agent_key}' not found")
     versions = (
-        await session.execute(
-            select(AgentVersion).where(AgentVersion.agent_id == agent.id)
-            .order_by(AgentVersion.version.desc())
+        (
+            await session.execute(
+                select(AgentVersion)
+                .where(AgentVersion.agent_id == agent.id)
+                .order_by(AgentVersion.version.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
         {
-            "version": v.version, "changelog": v.changelog, "published": v.published,
+            "version": v.version,
+            "changelog": v.changelog,
+            "published": v.published,
             "is_current": v.is_current,
             "published_at": v.published_at.isoformat() if v.published_at else None,
-            "published_by": v.published_by, "created_at": v.created_at.isoformat(),
+            "published_by": v.published_by,
+            "created_at": v.created_at.isoformat(),
             "config": v.config,
         }
         for v in versions
@@ -388,25 +439,23 @@ async def list_versions(agent_key: str, session: SessionDep,
 
 
 @router.post("/{agent_key}/versions/{version}/publish")
-async def publish_version(agent_key: str, version: int, request: Request, session: SessionDep,
-                          principal: PrincipalDep) -> dict[str, Any]:
+async def publish_version(
+    agent_key: str, version: int, request: Request, session: SessionDep, principal: PrincipalDep
+) -> dict[str, Any]:
     principal.require(Permission.AGENT_PUBLISH)
-    agent = (
-        await session.execute(select(Agent).where(Agent.key == agent_key))
-    ).scalar_one_or_none()
+    agent = (await session.execute(select(Agent).where(Agent.key == agent_key))).scalar_one_or_none()
     if agent is None:
         raise NotFoundError(f"Agent '{agent_key}' not found")
     target = (
         await session.execute(
-            select(AgentVersion).where(AgentVersion.agent_id == agent.id,
-                                       AgentVersion.version == version)
+            select(AgentVersion).where(AgentVersion.agent_id == agent.id, AgentVersion.version == version)
         )
     ).scalar_one_or_none()
     if target is None:
         raise NotFoundError(f"Version {version} not found for agent '{agent_key}'")
     others = (
-        await session.execute(select(AgentVersion).where(AgentVersion.agent_id == agent.id))
-    ).scalars().all()
+        (await session.execute(select(AgentVersion).where(AgentVersion.agent_id == agent.id))).scalars().all()
+    )
     for v in others:
         v.is_current = v.id == target.id
     target.published = True
@@ -417,15 +466,23 @@ async def publish_version(agent_key: str, version: int, request: Request, sessio
     agent.tools = target.config.get("tools", agent.tools)
     agent.knowledge_sources = target.config.get("knowledge_sources", agent.knowledge_sources)
     agent_registry.apply_override(agent_key, target.config)
-    await write_audit(session, principal=principal, action="agent.version.published",
-                      resource_type="agent", resource_id=agent_key, severity="warning",
-                      details={"version": version}, request=request)
+    await write_audit(
+        session,
+        principal=principal,
+        action="agent.version.published",
+        resource_type="agent",
+        resource_id=agent_key,
+        severity="warning",
+        details={"version": version},
+        request=request,
+    )
     return {"agent_key": agent_key, "version": version, "published": True}
 
 
 @router.post("/{agent_key}/versions/{version}/rollback")
-async def rollback_version(agent_key: str, version: int, request: Request, session: SessionDep,
-                           principal: PrincipalDep) -> dict[str, Any]:
+async def rollback_version(
+    agent_key: str, version: int, request: Request, session: SessionDep, principal: PrincipalDep
+) -> dict[str, Any]:
     principal.require(Permission.AGENT_PUBLISH)
     return await publish_version(agent_key, version, request, session, principal)
 
@@ -452,12 +509,11 @@ class CreateAgentRequest(BaseModel):
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_agent(payload: CreateAgentRequest, request: Request, session: SessionDep,
-                       principal: PrincipalDep) -> dict[str, Any]:
+async def create_agent(
+    payload: CreateAgentRequest, request: Request, session: SessionDep, principal: PrincipalDep
+) -> dict[str, Any]:
     principal.require(Permission.AGENT_WRITE)
-    existing = (
-        await session.execute(select(Agent).where(Agent.key == payload.key))
-    ).scalar_one_or_none()
+    existing = (await session.execute(select(Agent).where(Agent.key == payload.key))).scalar_one_or_none()
     if existing:
         raise ConflictError(f"Agent '{payload.key}' already exists")
     unknown = [t for t in payload.tools if not tool_registry.has(t)]
@@ -467,29 +523,63 @@ async def create_agent(payload: CreateAgentRequest, request: Request, session: S
     from app.agents.base import AgentSpec
 
     spec = AgentSpec(
-        key=payload.key, name=payload.name, description=payload.description,
-        category=payload.category, system_prompt=payload.system_prompt, model=payload.model,
-        temperature=payload.temperature, tools=payload.tools,
-        knowledge_sources=payload.knowledge_sources, memory_enabled=payload.memory_enabled,
-        final_approval_required=payload.final_approval_required, cost_cap_usd=payload.cost_cap_usd,
-        tags=payload.tags, owner=payload.owner, department=payload.department,
+        key=payload.key,
+        name=payload.name,
+        description=payload.description,
+        category=payload.category,
+        system_prompt=payload.system_prompt,
+        model=payload.model,
+        temperature=payload.temperature,
+        tools=payload.tools,
+        knowledge_sources=payload.knowledge_sources,
+        memory_enabled=payload.memory_enabled,
+        final_approval_required=payload.final_approval_required,
+        cost_cap_usd=payload.cost_cap_usd,
+        tags=payload.tags,
+        owner=payload.owner,
+        department=payload.department,
         input_schema=payload.input_schema,
     )
     agent_registry.register_custom(spec)
     config = spec.to_config()
     agent = Agent(
-        key=spec.key, name=spec.name, description=spec.description, category=spec.category,
-        availability="implemented", lifecycle_state="active", owner=spec.owner,
-        department=spec.department, version=1, is_builtin=False, config=config,
-        tags=spec.tags, tools=spec.tools, knowledge_sources=spec.knowledge_sources,
+        key=spec.key,
+        name=spec.name,
+        description=spec.description,
+        category=spec.category,
+        availability="implemented",
+        lifecycle_state="active",
+        owner=spec.owner,
+        department=spec.department,
+        version=1,
+        is_builtin=False,
+        config=config,
+        tags=spec.tags,
+        tools=spec.tools,
+        knowledge_sources=spec.knowledge_sources,
         created_by=principal.email,
     )
     session.add(agent)
     await session.flush()
-    session.add(AgentVersion(agent_id=agent.id, version=1, config=config,
-                             changelog="Initial version", published=True,
-                             published_at=datetime.now(UTC), published_by=principal.email,
-                             is_current=True))
-    await write_audit(session, principal=principal, action="agent.created", resource_type="agent",
-                      resource_id=agent.key, severity="warning", request=request)
+    session.add(
+        AgentVersion(
+            agent_id=agent.id,
+            version=1,
+            config=config,
+            changelog="Initial version",
+            published=True,
+            published_at=datetime.now(UTC),
+            published_by=principal.email,
+            is_current=True,
+        )
+    )
+    await write_audit(
+        session,
+        principal=principal,
+        action="agent.created",
+        resource_type="agent",
+        resource_id=agent.key,
+        severity="warning",
+        request=request,
+    )
     return _serialise_agent(agent, {})

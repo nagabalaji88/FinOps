@@ -69,14 +69,19 @@ async def cmd_load_sanctions(limit: int) -> None:
             dob = None
             if "DOB " in remarks:
                 dob = remarks.split("DOB ")[1].split(";")[0].strip()
-            session.add(SanctionsEntry(
-                list_name="OFAC_SDN",
-                entry_type="entity" if sdn_type.lower() != "individual" else "individual",
-                full_name=name, normalised_name=normalise_name(name),
-                aliases=aliases.get(uid, [])[:20], date_of_birth=dob, program=program,
-                source_url="https://sanctionslist.ofac.treas.gov/Home/SdnList",
-                remarks=remarks[:2000] or None,
-            ))
+            session.add(
+                SanctionsEntry(
+                    list_name="OFAC_SDN",
+                    entry_type="entity" if sdn_type.lower() != "individual" else "individual",
+                    full_name=name,
+                    normalised_name=normalise_name(name),
+                    aliases=aliases.get(uid, [])[:20],
+                    date_of_birth=dob,
+                    program=program,
+                    source_url="https://sanctionslist.ofac.treas.gov/Home/SdnList",
+                    remarks=remarks[:2000] or None,
+                )
+            )
             inserted += 1
             if limit and inserted >= limit:
                 break
@@ -132,17 +137,16 @@ async def cmd_retention(dry_run: bool) -> None:
             ("cost_records", CostRecord, CostRecord.timestamp),
         ]:
             count = int(
-                (await session.execute(
-                    select(func.count()).select_from(model).where(column < cutoff)
-                )).scalar_one()
+                (
+                    await session.execute(select(func.count()).select_from(model).where(column < cutoff))
+                ).scalar_one()
             )
             summary[label] = count
             if not dry_run and count:
                 await session.execute(delete(model).where(column < cutoff))
         if not dry_run:
             await session.commit()
-    print(json.dumps({"cutoff": cutoff.isoformat(), "dry_run": dry_run,
-                      "records": summary}, indent=2))
+    print(json.dumps({"cutoff": cutoff.isoformat(), "dry_run": dry_run, "records": summary}, indent=2))
 
 
 async def cmd_validate(
@@ -188,8 +192,7 @@ async def cmd_validate(
         prepared = await prepare_environment(selected)
         for step in prepared["steps"]:
             detail = {k: v for k, v in step.items() if k not in {"step", "action"}}
-            print(f"  {step['step']:<16} {step['action']}"
-                  + (f"  {json.dumps(detail)}" if detail else ""))
+            print(f"  {step['step']:<16} {step['action']}" + (f"  {json.dumps(detail)}" if detail else ""))
         print()
 
     await init_vector_store(active_dimensions())
@@ -204,15 +207,16 @@ async def cmd_validate(
 
     providers = preflight.get("configured_providers") or ["none"]
     order = "sequentially" if concurrency == 1 else f"{concurrency} at a time"
-    print(f"Running {len(selected)} input(s) {order} across "
-          f"{len({s.agent_key for s in selected})} agent(s) · providers: {', '.join(providers)}")
+    print(
+        f"Running {len(selected)} input(s) {order} across "
+        f"{len({s.agent_key for s in selected})} agent(s) · providers: {', '.join(providers)}"
+    )
 
     position = {"n": 0}
 
     def announce(result) -> None:
         position["n"] += 1
-        print(format_live(position["n"], len(selected), result, show_output=show_output),
-              flush=True)
+        print(format_live(position["n"], len(selected), result, show_output=show_output), flush=True)
 
     report = await validation_runner.run(selected, on_result=announce)
     print("\n" + "=" * 96)
@@ -228,8 +232,7 @@ async def cmd_validate(
     if not report.ok:
         return 1
     if fail_on_blocked and report.blocked:
-        print(f"\n  {report.blocked} scenario(s) could not be evaluated "
-              f"and --fail-on-blocked is set.")
+        print(f"\n  {report.blocked} scenario(s) could not be evaluated and --fail-on-blocked is set.")
         return 3
     return 0
 
@@ -265,16 +268,22 @@ async def cmd_verify_provider() -> int:
     checks: list[dict[str, Any]] = []
 
     def record(name: str, ok: bool | None, detail: str) -> None:
-        checks.append({"check": name, "status": "pass" if ok else
-                       "unproven" if ok is None else "fail", "detail": detail})
+        checks.append(
+            {
+                "check": name,
+                "status": "pass" if ok else "unproven" if ok is None else "fail",
+                "detail": detail,
+            }
+        )
 
     configured = model_router.configured_providers()
     usable = model_router.usable_providers()
-    record("provider_configured", bool(configured),
-           f"configured: {', '.join(configured) or 'none'}")
-    record("provider_reachable", bool(usable) if configured else False,
-           f"usable: {', '.join(usable) or 'none'} "
-           f"(configured but circuit-open providers are not usable)")
+    record("provider_configured", bool(configured), f"configured: {', '.join(configured) or 'none'}")
+    record(
+        "provider_reachable",
+        bool(usable) if configured else False,
+        f"usable: {', '.join(usable) or 'none'} (configured but circuit-open providers are not usable)",
+    )
 
     # 1. A real completion.
     response = None
@@ -282,11 +291,16 @@ async def cmd_verify_provider() -> int:
         try:
             response = await model_router.chat(
                 messages=[Message(role="user", content="Reply with the single word: ready")],
-                max_tokens=16, temperature=0.0, context={"purpose": "verification"},
+                max_tokens=16,
+                temperature=0.0,
+                context={"purpose": "verification"},
             )
-            record("live_completion", True,
-                   f"{response.model} via {response.provider} in "
-                   f"{response.latency_ms:.0f}ms, ${response.cost_usd:.6f}")
+            record(
+                "live_completion",
+                True,
+                f"{response.model} via {response.provider} in "
+                f"{response.latency_ms:.0f}ms, ${response.cost_usd:.6f}",
+            )
         except Exception as exc:
             record("live_completion", False, f"{type(exc).__name__}: {exc}")
     else:
@@ -298,11 +312,13 @@ async def cmd_verify_provider() -> int:
         for agent in status["agents"]:
             try:
                 result = await nemo_guardrails.check_input(
-                    agent, "What is the balance on my savings account?")
-                record(f"llm_rails::{agent}",
-                       result.evaluated and result.llm_rails,
-                       f"evaluated={result.evaluated} llm_rails={result.llm_rails} "
-                       f"blocked={result.blocked}")
+                    agent, "What is the balance on my savings account?"
+                )
+                record(
+                    f"llm_rails::{agent}",
+                    result.evaluated and result.llm_rails,
+                    f"evaluated={result.evaluated} llm_rails={result.llm_rails} blocked={result.blocked}",
+                )
             except Exception as exc:
                 record(f"llm_rails::{agent}", False, f"{type(exc).__name__}: {exc}")
     else:
@@ -311,10 +327,13 @@ async def cmd_verify_provider() -> int:
 
     # 3. The conformance suite is the end-to-end proof. It is only runnable if a
     #    completion actually succeeded — a configured-but-failing provider proves nothing.
-    record("conformance_suite", None if response is None else True,
-           "run `python -m app.cli validate` to execute the twenty scenarios"
-           if response is not None else
-           "cannot run until a live completion succeeds")
+    record(
+        "conformance_suite",
+        None if response is None else True,
+        "run `python -m app.cli validate` to execute the twenty scenarios"
+        if response is not None
+        else "cannot run until a live completion succeeds",
+    )
 
     width = max(len(c["check"]) for c in checks)
     print("\nModel-dependent verification\n" + "-" * (width + 46))
@@ -325,8 +344,10 @@ async def cmd_verify_provider() -> int:
     failed = [c for c in checks if c["status"] == "fail"]
     unproven = [c for c in checks if c["status"] == "unproven"]
     print("-" * (width + 46))
-    print(f"  {len(checks) - len(failed) - len(unproven)} verified, {len(failed)} failed, "
-          f"{len(unproven)} unproven")
+    print(
+        f"  {len(checks) - len(failed) - len(unproven)} verified, {len(failed)} failed, "
+        f"{len(unproven)} unproven"
+    )
     if unproven and not failed:
         print("\n  Set a provider key (see .env.example) and re-run to close these.")
     return 1 if failed else (2 if unproven else 0)
@@ -343,20 +364,30 @@ async def cmd_run_agent(agent_key: str, payload: str, user_email: str) -> None:
     await init_vector_store(active_dimensions())
     telemetry.install()
     async with session_scope() as session:
-        user = (
-            await session.execute(select(User).where(User.email == user_email))
-        ).scalar_one_or_none()
+        user = (await session.execute(select(User).where(User.email == user_email))).scalar_one_or_none()
         execution = await execution_engine.submit(
-            session, agent_key=agent_key, payload=json.loads(payload), user=user,
-            trigger="cli", wait=True,
+            session,
+            agent_key=agent_key,
+            payload=json.loads(payload),
+            user=user,
+            trigger="cli",
+            wait=True,
         )
         await session.refresh(execution)
-        print(json.dumps({
-            "execution_id": execution.id, "status": execution.status,
-            "latency_ms": execution.latency_ms, "cost_usd": execution.cost_usd,
-            "tokens": execution.tokens_input + execution.tokens_output,
-            "error": execution.error, "response": execution.final_response,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "execution_id": execution.id,
+                    "status": execution.status,
+                    "latency_ms": execution.latency_ms,
+                    "cost_usd": execution.cost_usd,
+                    "tokens": execution.tokens_input + execution.tokens_output,
+                    "error": execution.error,
+                    "response": execution.final_response,
+                },
+                indent=2,
+            )
+        )
 
 
 def main() -> None:
@@ -375,29 +406,41 @@ def main() -> None:
     retention = sub.add_parser("retention", help="Apply the data retention policy")
     retention.add_argument("--apply", action="store_true", help="Delete instead of reporting")
     sub.add_parser("health", help="Report platform and provider health")
-    sub.add_parser("verify-provider",
-                   help="Prove the model-dependent paths (live completion, LLM-backed "
-                        "rails, conformance suite) and report what is still unproven")
-    validate = sub.add_parser("validate",
-                              help="Run the conformance suite against the implemented agents")
+    sub.add_parser(
+        "verify-provider",
+        help="Prove the model-dependent paths (live completion, LLM-backed "
+        "rails, conformance suite) and report what is still unproven",
+    )
+    validate = sub.add_parser("validate", help="Run the conformance suite against the implemented agents")
     validate.add_argument("--agent", default=None, help="Restrict to one agent key")
-    validate.add_argument("--scenario", action="append", default=None,
-                          help="Run specific scenario ids (repeatable)")
+    validate.add_argument(
+        "--scenario", action="append", default=None, help="Run specific scenario ids (repeatable)"
+    )
     validate.add_argument("--tag", default=None, help="Restrict to scenarios carrying a tag")
     validate.add_argument("--output", default=None, help="Write the report to this path")
-    validate.add_argument("--format", dest="fmt", default="markdown",
-                          choices=["markdown", "json"])
+    validate.add_argument("--format", dest="fmt", default="markdown", choices=["markdown", "json"])
     validate.add_argument("--concurrency", type=int, default=1)
-    validate.add_argument("--reviewer", default="approver@finops.local",
-                          help="Identity used to decide approval gates")
-    validate.add_argument("--fail-on-blocked", action="store_true",
-                          help="Exit non-zero when a scenario cannot be evaluated "
-                               "(for example because no LLM provider is configured)")
-    validate.add_argument("--no-setup", dest="setup", action="store_false",
-                          help="Skip environment preparation and assume the database is "
-                               "already migrated and seeded")
-    validate.add_argument("--quiet", dest="show_output", action="store_false",
-                          help="Print verdicts only, without each agent's response")
+    validate.add_argument(
+        "--reviewer", default="approver@finops.local", help="Identity used to decide approval gates"
+    )
+    validate.add_argument(
+        "--fail-on-blocked",
+        action="store_true",
+        help="Exit non-zero when a scenario cannot be evaluated "
+        "(for example because no LLM provider is configured)",
+    )
+    validate.add_argument(
+        "--no-setup",
+        dest="setup",
+        action="store_false",
+        help="Skip environment preparation and assume the database is already migrated and seeded",
+    )
+    validate.add_argument(
+        "--quiet",
+        dest="show_output",
+        action="store_false",
+        help="Print verdicts only, without each agent's response",
+    )
     run = sub.add_parser("run-agent", help="Execute an agent from the command line")
     run.add_argument("agent_key")
     run.add_argument("--input", default="{}")
@@ -414,9 +457,18 @@ def main() -> None:
         "health": lambda: cmd_health(),
         "verify-provider": lambda: cmd_verify_provider(),
         "run-agent": lambda: cmd_run_agent(args.agent_key, args.input, args.user),
-        "validate": lambda: cmd_validate(args.agent, args.scenario, args.tag, args.output,
-                                         args.fmt, args.concurrency, args.reviewer,
-                                         args.fail_on_blocked, args.setup, args.show_output),
+        "validate": lambda: cmd_validate(
+            args.agent,
+            args.scenario,
+            args.tag,
+            args.output,
+            args.fmt,
+            args.concurrency,
+            args.reviewer,
+            args.fail_on_blocked,
+            args.setup,
+            args.show_output,
+        ),
     }
     try:
         exit_code = asyncio.run(commands[args.command]())

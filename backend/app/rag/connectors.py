@@ -82,13 +82,14 @@ class JiraConnector(Connector):
     async def fetch(self, source: KnowledgeSource) -> list[dict[str, Any]]:
         jql = (source.config or {}).get("jql", "ORDER BY updated DESC")
         limit = int((source.config or {}).get("limit", 50))
-        auth = base64.b64encode(
-            f"{settings.jira_email}:{settings.jira_api_token}".encode()
-        ).decode()
+        auth = base64.b64encode(f"{settings.jira_email}:{settings.jira_api_token}".encode()).decode()
         resp = await http_client().get(
             f"{settings.jira_base_url.rstrip('/')}/rest/api/3/search",
-            params={"jql": jql, "maxResults": limit,
-                    "fields": "summary,description,status,assignee,updated,priority,project"},
+            params={
+                "jql": jql,
+                "maxResults": limit,
+                "fields": "summary,description,status,assignee,updated,priority,project",
+            },
             headers={"Authorization": f"Basic {auth}", "Accept": "application/json"},
             timeout=60.0,
         )
@@ -98,18 +99,22 @@ class JiraConnector(Connector):
         for issue in issues:
             fields = issue.get("fields") or {}
             description = _adf_to_text(fields.get("description"))
-            documents.append({
-                "external_id": issue["key"],
-                "title": f"{issue['key']}: {fields.get('summary', '')}",
-                "content": f"# {fields.get('summary', '')}\n\n"
-                           f"Status: {(fields.get('status') or {}).get('name')}\n"
-                           f"Priority: {(fields.get('priority') or {}).get('name')}\n"
-                           f"Project: {(fields.get('project') or {}).get('name')}\n\n{description}",
-                "uri": f"{settings.jira_base_url.rstrip('/')}/browse/{issue['key']}",
-                "author": ((fields.get("assignee") or {}).get("displayName")),
-                "metadata": {"status": (fields.get("status") or {}).get("name"),
-                             "updated": fields.get("updated")},
-            })
+            documents.append(
+                {
+                    "external_id": issue["key"],
+                    "title": f"{issue['key']}: {fields.get('summary', '')}",
+                    "content": f"# {fields.get('summary', '')}\n\n"
+                    f"Status: {(fields.get('status') or {}).get('name')}\n"
+                    f"Priority: {(fields.get('priority') or {}).get('name')}\n"
+                    f"Project: {(fields.get('project') or {}).get('name')}\n\n{description}",
+                    "uri": f"{settings.jira_base_url.rstrip('/')}/browse/{issue['key']}",
+                    "author": ((fields.get("assignee") or {}).get("displayName")),
+                    "metadata": {
+                        "status": (fields.get("status") or {}).get("name"),
+                        "updated": fields.get("updated"),
+                    },
+                }
+            )
         return documents
 
 
@@ -138,28 +143,33 @@ class ConfluenceConnector(Connector):
         auth = base64.b64encode(
             f"{settings.confluence_email}:{settings.confluence_api_token}".encode()
         ).decode()
-        params: dict[str, Any] = {"limit": int(cfg.get("limit", 50)),
-                                  "expand": "body.storage,version,space"}
+        params: dict[str, Any] = {"limit": int(cfg.get("limit", 50)), "expand": "body.storage,version,space"}
         if cfg.get("space_key"):
             params["spaceKey"] = cfg["space_key"]
         resp = await http_client().get(
             f"{settings.confluence_base_url.rstrip('/')}/wiki/rest/api/content",
-            params=params, headers={"Authorization": f"Basic {auth}"}, timeout=60.0,
+            params=params,
+            headers={"Authorization": f"Basic {auth}"},
+            timeout=60.0,
         )
         resp.raise_for_status()
         documents = []
         for page in resp.json().get("results", []):
             html = ((page.get("body") or {}).get("storage") or {}).get("value", "")
-            documents.append({
-                "external_id": page["id"],
-                "title": page.get("title", "Untitled"),
-                "content": _strip_html(html),
-                "uri": f"{settings.confluence_base_url.rstrip('/')}/wiki"
-                       f"{(page.get('_links') or {}).get('webui', '')}",
-                "author": ((page.get("version") or {}).get("by") or {}).get("displayName"),
-                "metadata": {"space": ((page.get("space") or {}).get("key")),
-                             "version": (page.get("version") or {}).get("number")},
-            })
+            documents.append(
+                {
+                    "external_id": page["id"],
+                    "title": page.get("title", "Untitled"),
+                    "content": _strip_html(html),
+                    "uri": f"{settings.confluence_base_url.rstrip('/')}/wiki"
+                    f"{(page.get('_links') or {}).get('webui', '')}",
+                    "author": ((page.get("version") or {}).get("by") or {}).get("displayName"),
+                    "metadata": {
+                        "space": ((page.get("space") or {}).get("key")),
+                        "version": (page.get("version") or {}).get("number"),
+                    },
+                }
+            )
         return documents
 
 
@@ -188,7 +198,8 @@ class SlackConnector(Connector):
         resp = await http_client().get(
             "https://slack.com/api/conversations.history",
             params={"channel": channel, "limit": int(cfg.get("limit", 200))},
-            headers={"Authorization": f"Bearer {settings.slack_bot_token}"}, timeout=60.0,
+            headers={"Authorization": f"Bearer {settings.slack_bot_token}"},
+            timeout=60.0,
         )
         payload = resp.json()
         if not payload.get("ok"):
@@ -199,28 +210,36 @@ class SlackConnector(Connector):
             f"{m.get('user') or m.get('bot_id') or 'unknown'}: {m.get('text', '')}"
             for m in reversed(messages)
         )
-        return [{
-            "external_id": f"slack-{channel}",
-            "title": f"Slack #{cfg.get('channel_name', channel)}",
-            "content": transcript,
-            "uri": f"https://slack.com/app_redirect?channel={channel}",
-            "metadata": {"channel_id": channel, "message_count": len(messages)},
-        }]
+        return [
+            {
+                "external_id": f"slack-{channel}",
+                "title": f"Slack #{cfg.get('channel_name', channel)}",
+                "content": transcript,
+                "uri": f"https://slack.com/app_redirect?channel={channel}",
+                "metadata": {"channel_id": channel, "message_count": len(messages)},
+            }
+        ]
 
 
 class SharePointConnector(Connector):
     key = "sharepoint"
     label = "SharePoint / Microsoft 365"
-    required_settings = ("msgraph_tenant_id", "msgraph_client_id", "msgraph_client_secret",
-                         "sharepoint_site_id")
+    required_settings: tuple[str, ...] = (
+        "msgraph_tenant_id",
+        "msgraph_client_id",
+        "msgraph_client_secret",
+        "sharepoint_site_id",
+    )
 
     async def _token(self) -> str:
         resp = await http_client().post(
             f"https://login.microsoftonline.com/{settings.msgraph_tenant_id}/oauth2/v2.0/token",
-            data={"client_id": settings.msgraph_client_id,
-                  "client_secret": settings.msgraph_client_secret,
-                  "scope": "https://graph.microsoft.com/.default",
-                  "grant_type": "client_credentials"},
+            data={
+                "client_id": settings.msgraph_client_id,
+                "client_secret": settings.msgraph_client_secret,
+                "scope": "https://graph.microsoft.com/.default",
+                "grant_type": "client_credentials",
+            },
             timeout=45.0,
         )
         resp.raise_for_status()
@@ -231,7 +250,8 @@ class SharePointConnector(Connector):
         headers = {"Authorization": f"Bearer {token}"}
         resp = await http_client().get(
             f"https://graph.microsoft.com/v1.0/sites/{settings.sharepoint_site_id}/pages",
-            headers=headers, timeout=60.0,
+            headers=headers,
+            timeout=60.0,
         )
         resp.raise_for_status()
         documents = []
@@ -239,7 +259,8 @@ class SharePointConnector(Connector):
             detail = await http_client().get(
                 f"https://graph.microsoft.com/v1.0/sites/{settings.sharepoint_site_id}"
                 f"/pages/{page['id']}/microsoft.graph.sitePage?$expand=canvasLayout",
-                headers=headers, timeout=60.0,
+                headers=headers,
+                timeout=60.0,
             )
             body = ""
             if detail.status_code < 400:
@@ -248,13 +269,15 @@ class SharePointConnector(Connector):
                     for column in section.get("columns", []):
                         for webpart in column.get("webparts", []):
                             body += _strip_html(webpart.get("innerHtml") or "") + "\n"
-            documents.append({
-                "external_id": page["id"],
-                "title": page.get("title", "SharePoint page"),
-                "content": body or page.get("description", ""),
-                "uri": page.get("webUrl"),
-                "metadata": {"last_modified": page.get("lastModifiedDateTime")},
-            })
+            documents.append(
+                {
+                    "external_id": page["id"],
+                    "title": page.get("title", "SharePoint page"),
+                    "content": body or page.get("description", ""),
+                    "uri": page.get("webUrl"),
+                    "metadata": {"last_modified": page.get("lastModifiedDateTime")},
+                }
+            )
         return documents
 
 
@@ -272,7 +295,8 @@ class TeamsConnector(SharePointConnector):
         resp = await http_client().get(
             f"https://graph.microsoft.com/v1.0/teams/{team_id}/channels/{channel_id}/messages",
             headers={"Authorization": f"Bearer {token}"},
-            params={"$top": int(cfg.get("limit", 50))}, timeout=60.0,
+            params={"$top": int(cfg.get("limit", 50))},
+            timeout=60.0,
         )
         resp.raise_for_status()
         messages = resp.json().get("value", [])
@@ -282,13 +306,14 @@ class TeamsConnector(SharePointConnector):
             f"{_strip_html((m.get('body') or {}).get('content', ''))}"
             for m in reversed(messages)
         )
-        return [{
-            "external_id": f"teams-{channel_id}",
-            "title": f"Teams channel {cfg.get('channel_name', channel_id)}",
-            "content": transcript,
-            "metadata": {"team_id": team_id, "channel_id": channel_id,
-                         "message_count": len(messages)},
-        }]
+        return [
+            {
+                "external_id": f"teams-{channel_id}",
+                "title": f"Teams channel {cfg.get('channel_name', channel_id)}",
+                "content": transcript,
+                "metadata": {"team_id": team_id, "channel_id": channel_id, "message_count": len(messages)},
+            }
+        ]
 
 
 class GitHubConnector(Connector):
@@ -302,14 +327,17 @@ class GitHubConnector(Connector):
         if not repo:
             raise ValueError("GitHub source config requires 'repo' (owner/name)")
         paths = cfg.get("paths") or ["README.md", "docs"]
-        headers = {"Authorization": f"Bearer {settings.github_token}",
-                   "Accept": "application/vnd.github+json"}
+        headers = {
+            "Authorization": f"Bearer {settings.github_token}",
+            "Accept": "application/vnd.github+json",
+        }
         documents: list[dict[str, Any]] = []
 
         async def read_path(path: str) -> None:
             resp = await http_client().get(
                 f"https://api.github.com/repos/{repo}/contents/{path}",
-                headers=headers, timeout=45.0,
+                headers=headers,
+                timeout=45.0,
             )
             if resp.status_code >= 400:
                 return
@@ -323,14 +351,15 @@ class GitHubConnector(Connector):
                 ):
                     blob = await http_client().get(entry["download_url"], timeout=45.0)
                     if blob.status_code < 400:
-                        documents.append({
-                            "external_id": f"{repo}:{entry['path']}",
-                            "title": f"{repo}/{entry['path']}",
-                            "content": blob.text,
-                            "uri": entry.get("html_url"),
-                            "metadata": {"repo": repo, "path": entry["path"],
-                                         "sha": entry.get("sha")},
-                        })
+                        documents.append(
+                            {
+                                "external_id": f"{repo}:{entry['path']}",
+                                "title": f"{repo}/{entry['path']}",
+                                "content": blob.text,
+                                "uri": entry.get("html_url"),
+                                "metadata": {"repo": repo, "path": entry["path"], "sha": entry.get("sha")},
+                            }
+                        )
 
         for path in paths:
             await read_path(path)
@@ -367,8 +396,7 @@ class SqlConnector(Connector):
                 "external_id": str(row.get(id_column, index)),
                 "title": str(row.get(title_column, f"Row {index}")),
                 "content": str(row.get(content_column, "")),
-                "metadata": {k: str(v) for k, v in row.items()
-                             if k not in {title_column, content_column}},
+                "metadata": {k: str(v) for k, v in row.items() if k not in {title_column, content_column}},
             }
             for index, row in enumerate(rows)
         ]
@@ -387,8 +415,12 @@ class S3Connector(Connector):
         cfg = source.config or {}
         bucket = cfg.get("bucket", settings.minio_bucket)
         prefix = cfg.get("prefix", "")
-        client = Minio(settings.minio_endpoint, access_key=settings.minio_access_key,
-                       secret_key=settings.minio_secret_key, secure=settings.minio_secure)
+        client = Minio(
+            settings.minio_endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            secure=settings.minio_secure,
+        )
         objects = await asyncio.to_thread(
             lambda: list(client.list_objects(bucket, prefix=prefix, recursive=True))
         )
@@ -406,15 +438,19 @@ class S3Connector(Connector):
                     response.release_conn()
 
             data = await asyncio.to_thread(_read)
-            documents.append({
-                "external_id": f"{bucket}/{obj.object_name}",
-                "title": obj.object_name,
-                "content": data.decode("utf-8", errors="replace"),
-                "uri": f"s3://{bucket}/{obj.object_name}",
-                "metadata": {"bucket": bucket, "size": obj.size,
-                             "last_modified": obj.last_modified.isoformat()
-                             if obj.last_modified else None},
-            })
+            documents.append(
+                {
+                    "external_id": f"{bucket}/{obj.object_name}",
+                    "title": obj.object_name,
+                    "content": data.decode("utf-8", errors="replace"),
+                    "uri": f"s3://{bucket}/{obj.object_name}",
+                    "metadata": {
+                        "bucket": bucket,
+                        "size": obj.size,
+                        "last_modified": obj.last_modified.isoformat() if obj.last_modified else None,
+                    },
+                }
+            )
         return documents
 
 
@@ -435,14 +471,18 @@ class WebConnector(Connector):
             resp = await http_client().get(url, timeout=45.0)
             if resp.status_code >= 400:
                 continue
-            documents.append({
-                "external_id": url,
-                "title": url,
-                "content": _strip_html(resp.text),
-                "uri": url,
-                "metadata": {"status": resp.status_code,
-                             "content_type": resp.headers.get("content-type")},
-            })
+            documents.append(
+                {
+                    "external_id": url,
+                    "title": url,
+                    "content": _strip_html(resp.text),
+                    "uri": url,
+                    "metadata": {
+                        "status": resp.status_code,
+                        "content_type": resp.headers.get("content-type"),
+                    },
+                }
+            )
         return documents
 
 
@@ -461,8 +501,15 @@ class UploadConnector(Connector):
 CONNECTORS: dict[str, Connector] = {
     c.key: c
     for c in [
-        JiraConnector(), ConfluenceConnector(), SlackConnector(), SharePointConnector(),
-        TeamsConnector(), GitHubConnector(), SqlConnector(), S3Connector(), WebConnector(),
+        JiraConnector(),
+        ConfluenceConnector(),
+        SlackConnector(),
+        SharePointConnector(),
+        TeamsConnector(),
+        GitHubConnector(),
+        SqlConnector(),
+        S3Connector(),
+        WebConnector(),
         UploadConnector(),
     ]
 }
@@ -470,7 +517,6 @@ CONNECTORS: dict[str, Connector] = {
 
 def connector_status() -> list[dict[str, Any]]:
     return [
-        {"key": c.key, "label": c.label, "configured": c.configured,
-         "missing_settings": c.missing()}
+        {"key": c.key, "label": c.label, "configured": c.configured, "missing_settings": c.missing()}
         for c in CONNECTORS.values()
     ]

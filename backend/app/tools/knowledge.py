@@ -17,8 +17,7 @@ from app.tools.base import ToolContext, tool
 class SearchArgs(BaseModel):
     query: str
     top_k: int = Field(default=6, ge=1, le=25)
-    sources: list[str] = Field(default_factory=list,
-                               description="Restrict to knowledge source keys")
+    sources: list[str] = Field(default_factory=list, description="Restrict to knowledge source keys")
     min_score: float = Field(default=0.05, ge=0.0, le=1.0)
 
 
@@ -31,8 +30,13 @@ class SearchArgs(BaseModel):
 )
 async def search_knowledge_base(args: SearchArgs, ctx: ToolContext) -> dict[str, Any]:
     result = await pipeline.search(
-        ctx.session, args.query, top_k=args.top_k, source_keys=args.sources or None,
-        min_score=args.min_score, agent_key=ctx.agent_key, execution_id=ctx.execution_id,
+        ctx.session,
+        args.query,
+        top_k=args.top_k,
+        source_keys=args.sources or None,
+        min_score=args.min_score,
+        agent_key=ctx.agent_key,
+        execution_id=ctx.execution_id,
     )
     return {
         "query": args.query,
@@ -68,9 +72,14 @@ async def list_knowledge_sources(args: SourcesArgs, ctx: ToolContext) -> dict[st
         "count": len(sources),
         "sources": [
             {
-                "key": s.key, "name": s.name, "connector": s.connector, "status": s.status,
-                "documents": s.document_count, "chunks": s.chunk_count,
-                "embedding_model": s.embedding_model, "dimensions": s.vector_dimensions,
+                "key": s.key,
+                "name": s.name,
+                "connector": s.connector,
+                "status": s.status,
+                "documents": s.document_count,
+                "chunks": s.chunk_count,
+                "embedding_model": s.embedding_model,
+                "dimensions": s.vector_dimensions,
                 "classification": s.classification,
                 "last_sync_at": s.last_sync_at.isoformat() if s.last_sync_at else None,
             }
@@ -132,9 +141,7 @@ async def knowledge_base_stats(args: StatsArgs, ctx: ToolContext) -> dict[str, A
     chunk_stmt = select(func.count()).select_from(Chunk)
     if args.source_key:
         source = (
-            await ctx.session.execute(
-                select(KnowledgeSource).where(KnowledgeSource.key == args.source_key)
-            )
+            await ctx.session.execute(select(KnowledgeSource).where(KnowledgeSource.key == args.source_key))
         ).scalar_one_or_none()
         if source is None:
             raise NotFoundError(f"Knowledge source '{args.source_key}' not found")
@@ -144,9 +151,11 @@ async def knowledge_base_stats(args: StatsArgs, ctx: ToolContext) -> dict[str, A
     documents = int((await ctx.session.execute(doc_stmt)).scalar_one())
     chunks = int((await ctx.session.execute(chunk_stmt)).scalar_one())
     embedded = int(
-        (await ctx.session.execute(
-            select(func.count()).select_from(Chunk).where(Chunk.embedding.is_not(None))
-        )).scalar_one()
+        (
+            await ctx.session.execute(
+                select(func.count()).select_from(Chunk).where(Chunk.embedding.is_not(None))
+            )
+        ).scalar_one()
     )
     dimensions = (
         await ctx.session.execute(select(Chunk.dimensions).where(Chunk.dimensions > 0).limit(1))
@@ -200,16 +209,17 @@ async def summarise_document(args: SummariseArgs, ctx: ToolContext) -> dict[str,
     }
     response = await router.chat(
         messages=[
-            Message(role="system",
-                    content=f"You summarise enterprise documents accurately with no invented "
-                            f"facts. {styles.get(args.style, styles['executive'])} "
-                            f"Maximum {args.max_words} words."),
+            Message(
+                role="system",
+                content=f"You summarise enterprise documents accurately with no invented "
+                f"facts. {styles.get(args.style, styles['executive'])} "
+                f"Maximum {args.max_words} words.",
+            ),
             Message(role="user", content=f"Title: {title or 'Untitled'}\n\n{content[:40000]}"),
         ],
         temperature=0.1,
         max_tokens=min(args.max_words * 3, 2000),
-        context={"execution_id": ctx.execution_id, "agent_key": ctx.agent_key,
-                 "user_email": ctx.user_email},
+        context={"execution_id": ctx.execution_id, "agent_key": ctx.agent_key, "user_email": ctx.user_email},
     )
     return {
         "document_id": args.document_id,

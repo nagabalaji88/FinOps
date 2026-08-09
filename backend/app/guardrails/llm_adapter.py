@@ -10,12 +10,15 @@ metering as every other model call the platform makes — and land in the same c
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.llm.router import router as model_router
-from app.llm.types import Message
+from app.llm.types import Message, Role
+
+#: The four roles `Message` accepts; anything else from a rail is treated as a user turn.
+ROLES: frozenset[str] = frozenset({"system", "user", "assistant", "tool"})
 
 log = get_logger("guardrails.llm")
 
@@ -32,16 +35,11 @@ def _to_messages(prompt: Any) -> list[Message]:
     messages: list[Message] = []
     for item in prompt:
         role = getattr(item, "role", None) or (item.get("role") if isinstance(item, dict) else None)
-        content = getattr(item, "content", None) or (
-            item.get("content") if isinstance(item, dict) else None
-        )
-        role_value = getattr(role, "value", role) or "user"
-        if role_value not in {"user", "assistant", "system", "tool"}:
-            role_value = "user"
+        content = getattr(item, "content", None) or (item.get("content") if isinstance(item, dict) else None)
+        raw_role = str(getattr(role, "value", role) or "user")
+        role_value: Role = cast(Role, raw_role) if raw_role in ROLES else "user"
         if isinstance(content, list):  # multi-part content: keep the text parts
-            content = " ".join(
-                part.get("text", "") for part in content if isinstance(part, dict)
-            )
+            content = " ".join(part.get("text", "") for part in content if isinstance(part, dict))
         messages.append(Message(role=role_value, content=str(content or "")))
     return messages or [Message(role="user", content="")]
 

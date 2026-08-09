@@ -12,8 +12,15 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 Provider = Literal[
-    "openai", "azure_openai", "anthropic", "google", "bedrock", "mistral", "deepseek",
-    "together", "ollama",
+    "openai",
+    "azure_openai",
+    "anthropic",
+    "google",
+    "bedrock",
+    "mistral",
+    "deepseek",
+    "together",
+    "ollama",
 ]
 
 
@@ -46,6 +53,11 @@ def _register(*specs: ModelSpec) -> None:
         CATALOG[spec.id] = spec
 
 
+# fmt: off
+# The catalogue is a price list. Each model occupies two lines with its fields in a fixed
+# order, so a reviewer can scan a column — context window, input price, output price —
+# down the page and compare. One argument per line would run to a thousand lines and
+# make that comparison impossible.
 # --- OpenAI -----------------------------------------------------------------
 _register(
     ModelSpec("gpt-5.5", "openai", "GPT-5.5", "gpt", 400_000, 128_000, 1.75, 14.0, 0.175,
@@ -124,6 +136,8 @@ _register(
               is_embedding=True, dimensions=768, tier="embedding",
               supports_tools=False, supports_streaming=False),
 )
+
+# fmt: on
 
 
 def _apply_overrides() -> None:
