@@ -26,7 +26,7 @@ import {
   MapPinIcon,
 } from '@heroicons/react/24/outline'
 import { api, AnimatedNumber, Badge, Card, CardHeader, ChartTooltip, EmptyState, ErrorState, Meter, PageHeader, Reveal, SkeletonCard, Stagger, Tabs, TabPanel, formatCompact, formatNumber, formatPercent, relativeTime } from '@finops/shared'
-import { Globe, type GlobeArc, type GlobeMarker, type RiskLevel } from '@/components/geo/Globe'
+import { Globe, type GlobeMarker, type RiskLevel } from '@/components/geo/Globe'
 import { ShareGauge } from '@/components/geo/ShareGauge'
 
 interface GeoCountry {
@@ -234,22 +234,6 @@ export default function Geography() {
     return [...countryMarkers, ...cityMarkers]
   }, [data])
 
-  const arcs = useMemo<GlobeArc[]>(() => {
-    if (!data) return []
-    const peak = Math.max(...data.corridors.map((corridor) => corridor.total_value), 1)
-    return data.corridors.slice(0, 24).map((corridor) => ({
-      id: `corridor:${corridor.from_city}:${corridor.to_code}`,
-      from: {
-        latitude: corridor.from_latitude,
-        longitude: corridor.from_longitude,
-      },
-      to: { latitude: corridor.to_latitude, longitude: corridor.to_longitude },
-      risk: corridor.risk_level,
-      weight: corridor.total_value / peak,
-      label: `${corridor.from_city} → ${corridor.to_country}`,
-    }))
-  }, [data])
-
   /** Where the globe should face on load: the bank's domestic market. */
   const home = useMemo(() => {
     const domestic = data?.countries.find((country) => country.domestic) ?? data?.countries[0]
@@ -405,7 +389,7 @@ export default function Geography() {
             <Card className="flex flex-col overflow-hidden">
               <CardHeader
                 title="Global activity"
-                subtitle="Drag to rotate. Marker size is share of transaction value; arcs are live corridors."
+                subtitle="Drag to rotate. Marker size is share of transaction value."
                 action={
                   <div className="hidden items-center gap-3 sm:flex">
                     {(['domestic', 'standard', 'elevated', 'high'] as RiskLevel[]).map((risk) => (
@@ -419,7 +403,6 @@ export default function Geography() {
               />
               <Globe
                 markers={markers}
-                arcs={arcs}
                 selectedId={selected}
                 onSelect={setSelected}
                 initialCentre={home}

@@ -1,23 +1,19 @@
 /**
  * Orthographic globe.
  *
- * Markers are placed at their true latitude and longitude, corridors follow great-circle
- * paths, and the far hemisphere is clipped. The globe rotates on its own, can be dragged,
- * and flies to a marker when one is selected elsewhere on the page.
+ * Real coastlines and national borders (Natural Earth 1:110m, via world-atlas) are drawn
+ * through d3-geo, which clips the far hemisphere along the limb properly — a hand-rolled
+ * clipper can split a polyline but cannot close a filled landmass that runs off the edge.
+ * Markers sit at their true latitude and longitude. The globe spins on its own, can be
+ * dragged, and flies to a marker when one is selected elsewhere on the page.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import {
-  type LatLon,
-  type Rotation,
-  graticule,
-  greatCircle,
-  markerRadius,
-  project,
-  shortestDelta,
-  toPath,
-  visibleRuns,
-} from '@/lib/geo'
+import { geoDistance, geoGraticule10, geoOrthographic, geoPath } from 'd3-geo'
+import { feature, mesh } from 'topojson-client'
+import type { GeometryCollection, Topology } from 'topojson-specification'
+import worldAtlas from 'world-atlas/countries-110m.json'
+import { type LatLon, type Rotation, markerRadius, shortestDelta } from '@/lib/geo'
 import { cn } from '@finops/shared'
 
 export type RiskLevel = 'high' | 'elevated' | 'standard' | 'domestic'
@@ -32,15 +28,6 @@ export interface GlobeMarker extends LatLon {
   secondary: string
 }
 
-export interface GlobeArc {
-  id: string
-  from: LatLon
-  to: LatLon
-  risk: RiskLevel
-  weight: number
-  label: string
-}
-
 const RISK_COLOR: Record<RiskLevel, string> = {
   high: 'rgb(var(--state-err))',
   elevated: 'rgb(var(--state-warn))',
@@ -53,16 +40,23 @@ const RADIUS = 208
 const CENTRE = { x: SIZE / 2, y: SIZE / 2 }
 const SPIN_DEGREES_PER_SECOND = 5.5
 
+// Parsed once for the lifetime of the module, not per render: the topology is static.
+// Land is every country as a single FeatureCollection, so the fill costs one path element
+// rather than 177; borders are the interior mesh, so no boundary is drawn twice.
+const topology = worldAtlas as unknown as Topology
+const countries = topology.objects.countries as GeometryCollection
+const LAND = feature(topology, countries)
+const BORDERS = mesh(topology, countries, (a, b) => a !== b)
+const GRATICULE = geoGraticule10()
+
 export function Globe({
   markers,
-  arcs,
   selectedId,
   onSelect,
   initialCentre,
   className,
 }: {
   markers: GlobeMarker[]
-  arcs: GlobeArc[]
   selectedId: string | null
   onSelect: (id: string | null) => void
   /** Where the globe faces on load — normally the bank's domestic market. */
@@ -150,31 +144,42 @@ export function Globe({
     drag.current = null
   }, [])
 
-  const graticulePaths = useMemo(() => {
-    const lines = graticule(30)
-    return lines
-      .map((line) => visibleRuns(line.map((point) => ({ point, lift: 1 })), rotation, RADIUS, CENTRE))
-      .flat()
-      .map(toPath)
+  // d3 rotates the sphere, so the angles are negated: [-lambda, -phi] brings the requested
+  // longitude and latitude to the centre of the disc. clipAngle(90) drops the far side.
+  const geography = useMemo(() => {
+    const projection = geoOrthographic()
+      .scale(RADIUS)
+      .translate([CENTRE.x, CENTRE.y])
+      .rotate([-rotation.lambda, -rotation.phi])
+      .clipAngle(90)
+    const path = geoPath(projection)
+    return {
+      projection,
+      land: path(LAND) ?? '',
+      borders: path(BORDERS) ?? '',
+      graticule: path(GRATICULE) ?? '',
+    }
   }, [rotation])
 
-  const arcPaths = useMemo(
-    () =>
-      arcs.map((arc) => ({
-        arc,
-        runs: visibleRuns(greatCircle(arc.from, arc.to), rotation, RADIUS, CENTRE).map(toPath),
-      })),
-    [arcs, rotation],
-  )
-
-  const placed = useMemo(
-    () =>
-      markers
-        .map((marker) => ({ marker, position: project(marker, rotation, RADIUS, CENTRE) }))
-        .filter((entry) => entry.position.visible)
-        .sort((a, b) => a.position.depth - b.position.depth),
-    [markers, rotation],
-  )
+  const placed = useMemo(() => {
+    const { projection } = geography
+    // clipAngle only clips what geoPath draws: calling the projection directly still returns
+    // a coordinate for the far hemisphere, and it lands inside the disc. Visibility has to be
+    // judged on the angle from the view centre, which is the point .rotate() negates *to* —
+    // [lambda, phi], not the negated pair handed to .rotate().
+    const centre: [number, number] = [rotation.lambda, rotation.phi]
+    return markers
+      .map((marker) => {
+        const point = projection([marker.longitude, marker.latitude])
+        const angle = geoDistance([marker.longitude, marker.latitude], centre)
+        return { marker, point, depth: Math.cos(angle) }
+      })
+      .filter(
+        (entry): entry is { marker: GlobeMarker; point: [number, number]; depth: number } =>
+          entry.point !== null && entry.depth >= 0,
+      )
+      .sort((a, b) => a.depth - b.depth)
+  }, [markers, geography, rotation])
 
   const active = hovered ?? selectedId
   const activeEntry = placed.find((entry) => entry.marker.id === active) ?? null
@@ -198,7 +203,7 @@ export function Globe({
         }}
       >
         <defs>
-          <radialGradient id="globe-face" cx="34%" cy="26%" r="82%">
+          <radialGradient id="globe-ocean" cx="34%" cy="26%" r="82%">
             <stop offset="0%" stopColor="rgb(var(--surface-raised))" stopOpacity="1" />
             <stop offset="58%" stopColor="rgb(var(--surface-muted))" stopOpacity="0.96" />
             <stop offset="100%" stopColor="rgb(var(--accent-soft))" stopOpacity="0.92" />
@@ -212,9 +217,6 @@ export function Globe({
             <stop offset="92%" stopColor="rgb(var(--ink))" stopOpacity="0.05" />
             <stop offset="100%" stopColor="rgb(var(--ink))" stopOpacity="0" />
           </radialGradient>
-          <clipPath id="globe-clip">
-            <circle cx={CENTRE.x} cy={CENTRE.y} r={RADIUS} />
-          </clipPath>
         </defs>
 
         <circle cx={CENTRE.x} cy={CENTRE.y} r={RADIUS + 34} fill="url(#globe-halo)" />
@@ -225,19 +227,41 @@ export function Globe({
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
           style={{ transformOrigin: `${CENTRE.x}px ${CENTRE.y}px` }}
         >
-          <circle cx={CENTRE.x} cy={CENTRE.y} r={RADIUS} fill="url(#globe-face)" />
-          <g clipPath="url(#globe-clip)" opacity={0.55}>
-            {graticulePaths.map((path, index) => (
-              <path
-                key={index}
-                d={path}
-                fill="none"
-                stroke="rgb(var(--line))"
-                strokeWidth={0.8}
-                vectorEffect="non-scaling-stroke"
-              />
-            ))}
-          </g>
+          {/* Ocean */}
+          <circle cx={CENTRE.x} cy={CENTRE.y} r={RADIUS} fill="url(#globe-ocean)" />
+
+          {/* Graticule, under the land so it reads as sea markings */}
+          <path
+            d={geography.graticule}
+            fill="none"
+            stroke="rgb(var(--line))"
+            strokeWidth={0.5}
+            opacity={0.4}
+            vectorEffect="non-scaling-stroke"
+          />
+
+          {/* Land and national borders */}
+          <path d={geography.land} fill="rgb(var(--accent-soft))" fillOpacity={0.85} stroke="none" />
+          <path
+            d={geography.borders}
+            fill="none"
+            stroke="rgb(var(--line))"
+            strokeWidth={0.6}
+            strokeOpacity={0.9}
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+          <path
+            d={geography.land}
+            fill="none"
+            stroke="rgb(var(--ink-subtle))"
+            strokeWidth={0.7}
+            strokeOpacity={0.55}
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+
+          {/* Shading towards the limb, then the outline of the disc */}
           <circle cx={CENTRE.x} cy={CENTRE.y} r={RADIUS} fill="url(#globe-limb)" />
           <circle
             cx={CENTRE.x}
@@ -248,38 +272,16 @@ export function Globe({
             strokeWidth={1}
           />
 
-          {/* Corridors */}
-          <g fill="none" strokeLinecap="round">
-            {arcPaths.map(({ arc, runs }) =>
-              runs.map((path, index) => (
-                <g key={`${arc.id}-${index}`}>
-                  <path
-                    d={path}
-                    stroke={RISK_COLOR[arc.risk]}
-                    strokeOpacity={active && active !== arc.id ? 0.12 : 0.3}
-                    strokeWidth={0.8 + arc.weight * 1.8}
-                  />
-                  {!reduceMotion && (
-                    <path
-                      d={path}
-                      stroke={RISK_COLOR[arc.risk]}
-                      strokeOpacity={0.9}
-                      strokeWidth={0.8 + arc.weight * 1.6}
-                      strokeDasharray="6 92"
-                      className="globe-arc-flow"
-                      style={{ animationDelay: `${(arc.weight * 1.7) % 2.4}s` }}
-                    />
-                  )}
-                </g>
-              )),
-            )}
-          </g>
-
           {/* Markers */}
-          {placed.map(({ marker, position }, index) => {
-            const radius = markerRadius(marker.share, marker.kind === 'city' ? 2.8 : 4, marker.kind === 'city' ? 6 : 11)
+          {placed.map(({ marker, point, depth }, index) => {
+            const [x, y] = point
+            const radius = markerRadius(
+              marker.share,
+              marker.kind === 'city' ? 2.8 : 4,
+              marker.kind === 'city' ? 6 : 11,
+            )
             const isActive = marker.id === active
-            const fade = 0.35 + 0.65 * Math.min(1, position.depth * 1.6)
+            const fade = 0.35 + 0.65 * Math.min(1, depth * 1.6)
             return (
               <motion.g
                 key={marker.id}
@@ -290,7 +292,7 @@ export function Globe({
                   duration: 0.45,
                   ease: [0.34, 1.56, 0.64, 1],
                 }}
-                style={{ transformOrigin: `${position.x}px ${position.y}px`, cursor: 'pointer' }}
+                style={{ transformOrigin: `${x}px ${y}px`, cursor: 'pointer' }}
                 onMouseEnter={() => setHovered(marker.id)}
                 onMouseLeave={() => setHovered(null)}
                 onClick={() => onSelect(marker.id === selectedId ? null : marker.id)}
@@ -299,8 +301,8 @@ export function Globe({
               >
                 {(isActive || marker.risk === 'high') && !reduceMotion && (
                   <circle
-                    cx={position.x}
-                    cy={position.y}
+                    cx={x}
+                    cy={y}
                     r={radius}
                     fill="none"
                     stroke={RISK_COLOR[marker.risk]}
@@ -309,15 +311,15 @@ export function Globe({
                   />
                 )}
                 <circle
-                  cx={position.x}
-                  cy={position.y}
+                  cx={x}
+                  cy={y}
                   r={radius + 4}
                   fill={RISK_COLOR[marker.risk]}
                   fillOpacity={isActive ? 0.22 : 0.12}
                 />
                 <circle
-                  cx={position.x}
-                  cy={position.y}
+                  cx={x}
+                  cy={y}
                   r={radius}
                   fill={RISK_COLOR[marker.risk]}
                   stroke="rgb(var(--surface-raised))"
@@ -340,8 +342,8 @@ export function Globe({
             transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
             className="pointer-events-none absolute z-10 min-w-[9rem] -translate-x-1/2 -translate-y-full rounded-xl border border-line/70 bg-surface-raised/95 px-3 py-2 shadow-glass-lg backdrop-blur-xl"
             style={{
-              left: `${(activeEntry.position.x / SIZE) * 100}%`,
-              top: `${((activeEntry.position.y - 16) / SIZE) * 100}%`,
+              left: `${(activeEntry.point[0] / SIZE) * 100}%`,
+              top: `${((activeEntry.point[1] - 16) / SIZE) * 100}%`,
             }}
           >
             <p className="text-xs font-semibold tracking-tight text-ink">{activeEntry.marker.name}</p>

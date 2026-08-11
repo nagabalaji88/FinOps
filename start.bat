@@ -9,6 +9,11 @@ REM
 REM  Usage:   start.bat              normal run (installs only what is missing)
 REM           start.bat reinstall    force a clean reinstall of dependencies
 REM           start.bat reseed       rebuild the database from scratch
+REM
+REM  Sign-in trouble? The seed hashes BOOTSTRAP_ADMIN_PASSWORD once, while the
+REM  users table is still empty. Editing .env afterwards does not change the
+REM  stored hash, so "start.bat reseed" is the fix. This script checks for that
+REM  drift before launching and prints the working credentials at the end.
 REM ===========================================================================
 
 setlocal EnableDelayedExpansion
@@ -16,6 +21,7 @@ cd /d "%~dp0"
 
 set "MODE=%~1"
 set "PY=.venv\Scripts\python.exe"
+set "PYOK=import sys;raise SystemExit(0 if sys.version_info[:2] in ((3,11),(3,12),(3,13)) else 1)"
 
 echo.
 echo ===========================================================
@@ -70,9 +76,38 @@ if not errorlevel 1 (
     goto :fail
 )
 
-echo [1/6] Configuration looks sane.
+echo [1/7] Configuration looks sane.
 
-REM --- 2. Python virtual environment ---------------------------------------
+REM --- 2. Pick an interpreter the dependencies actually support -------------
+REM  NeMo Guardrails declares >=3.10,<3.14, and every implemented agent declares
+REM  rails, so 3.14 is not merely untested - the install fails minutes in with a
+REM  resolver error that never names the package. Prefer the newest supported.
+set "PYEXE="
+for %%V in (3.13 3.12 3.11) do (
+    if not defined PYEXE (
+        py -%%V -c "raise SystemExit(0)" >nul 2>&1
+        if not errorlevel 1 set "PYEXE=py -%%V"
+    )
+)
+if not defined PYEXE (
+    python -c "%PYOK%" >nul 2>&1
+    if not errorlevel 1 set "PYEXE=python"
+)
+if not defined PYEXE (
+    echo [X] No supported Python found. This project needs 3.11, 3.12 or 3.13.
+    echo.
+    echo     Installed right now:
+    py -0p 2>nul
+    python --version 2>nul
+    echo.
+    echo     Python 3.14 will not work - NeMo Guardrails has no 3.14 release.
+    echo     Install 3.13 from https://www.python.org/downloads/ and re-run.
+    goto :fail
+)
+for /f "delims=" %%A in ('%PYEXE% -c "import sys;print(sys.version.split()[0])"') do set "PYVER=%%A"
+echo [2/7] Using Python !PYVER! ^(!PYEXE!^).
+
+REM --- 3. Python virtual environment ----------------------------------------
 pushd backend
 
 if /I "%MODE%"=="reinstall" (
@@ -82,22 +117,43 @@ if /I "%MODE%"=="reinstall" (
     )
 )
 
-if not exist "%PY%" (
-    echo [2/6] Creating the Python virtual environment...
-    python -m venv .venv
+REM A venv built by a different interpreter keeps working until an import of a
+REM compiled wheel fails - the ModuleNotFoundError names pydantic_core, not the
+REM version mismatch that caused it. Check both, and say which.
+if exist "%PY%" (
+    "%PY%" -c "%PYOK%" >nul 2>&1
     if errorlevel 1 (
-        echo [X] Could not create a virtual environment. Is Python 3.11+ installed
-        echo     and on PATH?  Check with:  python --version
+        echo       The existing .venv runs an unsupported Python. Rebuilding it...
+        rmdir /s /q .venv
+    )
+)
+if exist "%PY%" (
+    if exist "%PY%.installed" (
+        "%PY%" -c "import pydantic_core" >nul 2>&1
+        if errorlevel 1 (
+            echo       The existing .venv has broken compiled packages. Rebuilding it...
+            rmdir /s /q .venv
+        )
+    )
+)
+
+if not exist "%PY%" (
+    echo [3/7] Creating the Python virtual environment...
+    %PYEXE% -m venv .venv
+    if errorlevel 1 (
+        echo [X] Could not create a virtual environment.
+        echo     If the error mentions copying venvlauncher.exe, an antivirus or an
+        echo     open file is holding .venv - close any running API window, then:
+        echo         rmdir /s /q backend\.venv
         popd
         goto :fail
     )
-    set "FRESH_VENV=1"
 ) else (
-    echo [2/6] Virtual environment already present.
+    echo [3/7] Virtual environment already present.
 )
 
 if not exist "%PY%.installed" (
-    echo [3/6] Installing backend dependencies - this takes a few minutes...
+    echo [4/7] Installing backend dependencies - this takes a few minutes...
     "%PY%" -m pip install --upgrade pip --quiet
     "%PY%" -m pip install -e ".[dev,guardrails]"
     if errorlevel 1 (
@@ -108,10 +164,10 @@ if not exist "%PY%.installed" (
     REM Marker so a later run skips the install without re-resolving every package.
     echo installed> "%PY%.installed"
 ) else (
-    echo [3/6] Backend dependencies already installed.
+    echo [4/7] Backend dependencies already installed.
 )
 
-REM --- 3. Database ----------------------------------------------------------
+REM --- 4. Database ----------------------------------------------------------
 if /I "%MODE%"=="reseed" (
     if exist "finops.db" (
         echo       Deleting the existing database...
@@ -119,29 +175,48 @@ if /I "%MODE%"=="reseed" (
     )
 )
 
-if not exist "finops.db" (
-    echo [4/6] Creating the schema and seeding the platform...
-    "%PY%" -m app.cli init-db
-    if errorlevel 1 (
-        echo [X] init-db failed. The message above says why - most often a value
-        echo     in .env that cannot be parsed.
-        popd
-        goto :fail
-    )
-    echo       Loading the sample bank ^(24 customers^)...
-    "%PY%" -m app.cli seed-banking --customers 24
-    if errorlevel 1 (
-        echo [X] seed-banking failed.
-        popd
-        goto :fail
-    )
-) else (
-    echo [4/6] Database already exists - skipping seed. Use "start.bat reseed" to rebuild.
+if not exist "finops.db" goto :seed
+
+REM The file existing does not mean the seed finished, nor that its hashed
+REM password still matches .env. doctor exits 2 for unseeded, 1 for drifted.
+"%PY%" scripts\doctor.py --quiet
+if errorlevel 2 goto :seed
+if errorlevel 1 (
+    echo.
+    "%PY%" scripts\doctor.py
+    popd
+    goto :fail
+)
+echo [5/7] Database already seeded, and its password matches .env.
+goto :dbready
+
+:seed
+echo [5/7] Creating the schema and seeding the platform...
+"%PY%" -m app.cli init-db
+if errorlevel 1 (
+    echo [X] init-db failed. The message above says why - most often a value
+    echo     in .env that cannot be parsed.
+    popd
+    goto :fail
+)
+echo       Loading the sample bank ^(24 customers^)...
+"%PY%" -m app.cli seed-banking --customers 24
+if errorlevel 1 (
+    echo [X] seed-banking failed.
+    popd
+    goto :fail
 )
 
+:dbready
 popd
 
-REM --- 4. Frontend ----------------------------------------------------------
+REM --- 5. Frontend ----------------------------------------------------------
+where node >nul 2>&1
+if errorlevel 1 (
+    echo [X] Node is not on PATH. Install Node 20 or newer from https://nodejs.org
+    goto :fail
+)
+
 if /I "%MODE%"=="reinstall" (
     if exist "node_modules" (
         echo       Removing node_modules...
@@ -150,18 +225,18 @@ if /I "%MODE%"=="reinstall" (
 )
 
 if not exist "node_modules" (
-    echo [5/6] Installing frontend dependencies - this takes a few minutes...
+    echo [6/7] Installing frontend dependencies - this takes a few minutes...
     call npm install
     if errorlevel 1 (
         echo [X] npm install failed. Is Node 20+ installed?  Check with:  node --version
         goto :fail
     )
 ) else (
-    echo [5/6] Frontend dependencies already installed.
+    echo [6/7] Frontend dependencies already installed.
 )
 
-REM --- 5. Launch ------------------------------------------------------------
-echo [6/6] Starting services in separate windows...
+REM --- 6. Launch ------------------------------------------------------------
+echo [7/7] Starting services in separate windows...
 echo.
 
 start "FinOps API"     cmd /k "cd /d "%~dp0backend" && .venv\Scripts\uvicorn.exe app.main:app --reload --port 8000"
@@ -180,12 +255,16 @@ echo     API docs      http://localhost:8000/docs
 echo     Execute app   http://localhost:5174
 echo     Console app   http://localhost:5173
 echo.
-echo     Sign in with the BOOTSTRAP_ADMIN_EMAIL and
-echo     BOOTSTRAP_ADMIN_PASSWORD values from your .env
-echo.
-echo   Close the three windows to stop everything.
+echo   Sign in through either front end, not against the API port.
 echo ===========================================================
 echo.
+
+REM Print the credentials this database actually accepts, rather than naming
+REM the .env key and leaving the reader to guess whether it was ever applied.
+pushd backend
+"%PY%" scripts\doctor.py
+popd
+
 timeout /t 12 /nobreak >nul
 goto :eof
 

@@ -25,7 +25,17 @@
       "PowerShell(cd D:\\\\AI_Gen\\\\Finals\\\\FinOps\\\\backend; Start-Process -FilePath \".\\\\.venv\\\\Scripts\\\\python.exe\" -ArgumentList \"-m\",\"uvicorn\",\"app.main:app\",\"--port\",\"8000\" -WindowStyle Hidden; Start-Sleep -Seconds 12; try { $r = Invoke-RestMethod http://localhost:8000/health/ready; $r | ConvertTo-Json -Depth 3 | Select-Object -First 30 } catch { Write-Output \"not ready: $_\" })",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Read(//home/user/FinOps/backend/**)",
+      "Bash(cd d:/AI_Gen/Finals/FinOps/backend && sed -n '1,40p' pyproject.toml && echo \"===== RUFF/MYPY =====\" && sed -n '/\\\\[tool.ruff\\\\]/,/^$/p;/\\\\[tool.mypy\\\\]/,/^$/p' pyproject.toml)",
+      "PowerShell(Set-Location \"d:\\\\AI_Gen\\\\Finals\\\\FinOps\\\\backend\"; & \".venv\\\\Scripts\\\\python.exe\" \"scripts\\\\doctor.py\"; Write-Output \"exit=$LASTEXITCODE\")",
+      "Bash(node -e \"for \\(const p of ['d3-geo','topojson-client','world-atlas']\\) console.log\\(p, require\\('./node_modules/'+p+'/package.json'\\).version\\)\")",
+      "Bash(node -e \"const w=require\\('./node_modules/world-atlas/countries-110m.json'\\); console.log\\('objects:', Object.keys\\(w.objects\\)\\); console.log\\('countries:', w.objects.countries.geometries.length\\); console.log\\('sample props:', JSON.stringify\\(w.objects.countries.geometries[0].properties\\)\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(npm audit *)",
+      "Bash(git diff *)",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)"
     ]
   }
 }

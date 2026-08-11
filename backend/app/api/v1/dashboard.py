@@ -43,6 +43,11 @@ metrics_router = APIRouter(prefix="/platform-metrics", tags=["metrics"])
 
 
 def _read_cpu_percent() -> float:
+    # getloadavg is POSIX-only, and on Windows the attribute does not exist at all: the
+    # AttributeError that raises is not an OSError, so the handler below never sees it.
+    # Zero is what the readers underneath already report for a metric the host cannot give.
+    if not hasattr(os, "getloadavg"):
+        return 0.0
     try:
         load = os.getloadavg()[0]
         return round(min(load / (os.cpu_count() or 1) * 100, 100.0), 2)

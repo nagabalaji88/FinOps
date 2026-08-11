@@ -100,10 +100,14 @@ def collect_runtime_gauges() -> None:
     process_cpu_percent.set(min(100.0, (now_cpu - prev_cpu) / elapsed * 100.0))
     _last_cpu = (now_wall, now_cpu)
     process_memory_bytes.set(_read_rss_bytes())
-    try:
-        system_load1.set(os.getloadavg()[0])
-    except OSError:
-        pass
+    # getloadavg is POSIX-only. On Windows the attribute is absent altogether, which raises
+    # AttributeError and sails straight past an OSError handler; the host has no load average
+    # to report, so leave the gauge alone rather than publishing a fabricated zero.
+    if hasattr(os, "getloadavg"):
+        try:
+            system_load1.set(os.getloadavg()[0])
+        except OSError:
+            pass
     _collect_gpu()
 
 

@@ -37,7 +37,7 @@ x-api-env: &api-env
   AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
   AWS_REGION: ${AWS_REGION:-us-east-1}
-  DEFAULT_MODEL: ${DEFAULT_MODEL:-claude-sonnet-4-5}
+  DEFAULT_MODEL: ${DEFAULT_MODEL:-claude-haiku-4-5}
 
 services:
   postgres:

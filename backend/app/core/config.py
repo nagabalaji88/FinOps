@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     aws_secret_access_key: str | None = None
     bedrock_endpoint: str | None = None
 
-    default_model: str = "claude-sonnet-4-5"
+    default_model: str = "claude-haiku-4-5"
 
     # --- NeMo Guardrails -----------------------------------------------------
     # Rail configurations live in app/guardrails/configs/<agent_key>/. Deterministic rails

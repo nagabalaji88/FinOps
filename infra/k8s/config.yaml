@@ -8,7 +8,7 @@ data:
   LOG_LEVEL: INFO
   LOG_JSON: "true"
   API_PREFIX: /api/v1
-  DEFAULT_MODEL: claude-sonnet-4-5
+  DEFAULT_MODEL: claude-haiku-4-5
   DEFAULT_EMBEDDING_MODEL: text-embedding-3-small
   REDIS_URL: redis://finops-redis:6379/0
   KAFKA_BOOTSTRAP_SERVERS: finops-kafka:9092

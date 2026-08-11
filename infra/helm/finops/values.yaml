@@ -83,7 +83,7 @@ ingress:
 config:
   environment: production
   logLevel: INFO
-  defaultModel: claude-sonnet-4-5
+  defaultModel: claude-haiku-4-5
   defaultEmbeddingModel: text-embedding-3-small
   dailyCostBudgetUsd: "500"
   monthlyCostBudgetUsd: "10000"
