@@ -342,3 +342,136 @@ class TestProviderSelection:
         finally:
             for breaker in breakers:
                 breaker._state = "closed"
+
+
+class _RejectingProvider:
+    """A key that authenticates but is entitled to nothing: every model answers 404."""
+
+    def __init__(self, name: str = "openai"):
+        self.name = name
+        self.configured = True
+        self.tried: list[str] = []
+
+    async def chat(self, *, model: str, messages: list[Message], **kwargs):
+        self.tried.append(model)
+        raise ProviderError(
+            f"{self.name} returned 404: The model `{model}` does not exist "
+            "or you do not have access to it.",
+            provider_status=404,
+        )
+
+
+def _rejecting_router() -> tuple[ModelRouter, _RejectingProvider]:
+    router = ModelRouter()
+    provider = _RejectingProvider()
+    router._providers = {"openai": provider}  # type: ignore[dict-item]
+    return router, provider
+
+
+class TestModelEntitlement:
+    """A model the provider disowns must leave the rotation.
+
+    This is the provider-level 'configured is not callable' rule one level down. It matters
+    because the guardrail layer fails closed on a model error: while a dead model stays
+    selectable, every railed agent is blocked, and nothing ever re-decides.
+    """
+
+    async def test_a_404_retires_the_model(self):
+        router, _ = _rejecting_router()
+        with pytest.raises(ProviderError):
+            await router.chat(messages=[Message(role="user", content="hi")], allow_fallback=False)
+        assert router.unavailable_models()
+
+    async def test_a_retired_model_is_not_offered_again(self):
+        router, provider = _rejecting_router()
+        with pytest.raises(ProviderError):
+            await router.chat(messages=[Message(role="user", content="hi")], allow_fallback=False)
+        first = provider.tried[0]
+        with pytest.raises(ProviderError):
+            await router.chat(messages=[Message(role="user", content="hi")], allow_fallback=False)
+        assert provider.tried[1] != first
+
+    async def test_a_404_is_not_retried(self):
+        """The answer is a property of the id, so the ladder only reproduces it."""
+        router, provider = _rejecting_router()
+        with pytest.raises(ProviderError):
+            await router.chat(messages=[Message(role="user", content="hi")], allow_fallback=False)
+        assert len(provider.tried) == 1
+
+    async def test_the_provider_becomes_unusable_once_every_chat_model_is_refused(self):
+        router, _ = _rejecting_router()
+        for _ in range(12):
+            try:
+                await router.chat(messages=[Message(role="user", content="hi")])
+            except Exception:
+                pass
+            if not router.usable_providers():
+                break
+        assert router.usable_providers() == []
+
+    async def test_embeddings_survive_a_chat_only_refusal(self):
+        """An account entitled to embeddings but not chat is usable for one, not the other."""
+        router, _ = _rejecting_router()
+        for _ in range(12):
+            try:
+                await router.chat(messages=[Message(role="user", content="hi")])
+            except Exception:
+                pass
+            if not router.usable_providers():
+                break
+        assert router.usable_providers(embeddings=False) == []
+        assert router.usable_providers(embeddings=True) == ["openai"]
+
+    async def test_the_error_names_the_entitlement_not_the_credential(self):
+        router, _ = _rejecting_router()
+        for _ in range(12):
+            try:
+                await router.chat(messages=[Message(role="user", content="hi")])
+            except ProviderNotConfiguredError as exc:
+                assert "refused by its provider" in exc.message
+                assert exc.details["refused"]
+                assert exc.details["configured_providers"] == ["openai"]
+                return
+            except Exception:
+                pass
+        pytest.fail("selection never reported the exhausted catalogue")
+
+    async def test_an_explicit_pin_falls_through_once_refused(self):
+        """Honouring the pin would hand back the same 404 on every request."""
+        router, provider = _rejecting_router()
+        with pytest.raises(ProviderError):
+            await router.chat(
+                messages=[Message(role="user", content="hi")], model="gpt-4o", allow_fallback=False
+            )
+        assert provider.tried == ["gpt-4o"]
+        with pytest.raises(Exception):
+            await router.chat(
+                messages=[Message(role="user", content="hi")], model="gpt-4o", allow_fallback=False
+            )
+        assert "gpt-4o" not in provider.tried[1:]
+
+    def test_new_credentials_clear_the_record(self):
+        router, _ = _rejecting_router()
+        router.mark_model_unavailable("gpt-4o", "404")
+        router.reload()
+        assert router.unavailable_models() == {}
+
+    @pytest.mark.parametrize("status", [500, 503, 429, 408])
+    async def test_an_outage_does_not_retire_the_model(self, status: int):
+        """A model is only retired when the provider disowns it, not when it is having a day."""
+        from app.core.resilience import get_breaker
+
+        # Breakers are process-global; an earlier case's failures must not decide this one.
+        breaker = get_breaker("llm:openai")
+        breaker._state, breaker._failures = "closed", 0
+        router = ModelRouter()
+
+        class Flaky(_RejectingProvider):
+            async def chat(self, *, model, messages, **kwargs):
+                self.tried.append(model)
+                raise ProviderError(f"boom {status}", provider_status=status)
+
+        router._providers = {"openai": Flaky()}  # type: ignore[dict-item]
+        with pytest.raises(ProviderError):
+            await router.chat(messages=[Message(role="user", content="hi")], allow_fallback=False)
+        assert router.unavailable_models() == {}

@@ -209,6 +209,12 @@ class NemoGuardrails:
         except Exception as exc:
             # A rail that cannot run is a blocked run, not a passed one.
             log.error("nemo_rail_error", agent=agent_key, side=side, error=str(exc))
+            # Whether the model layer is usable was decided when this configuration was
+            # built and cached. That answer has just been proven wrong, so drop it: the
+            # next load re-asks, and if the provider has meanwhile disowned every model it
+            # rebuilds with the deterministic rails alone rather than blocking every run
+            # from here on. Without this the first model failure is permanent.
+            self._rails.pop((agent_key, True), None)
             return RailResult(
                 evaluated=True,
                 blocked=True,

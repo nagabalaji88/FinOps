@@ -199,9 +199,18 @@ class InputRailsNode(Node):
             log_message=f"Input rails: {len(findings)} findings{', blocked' if result.blocked else ''}",
         )
         if result.blocked and settings.nemo_block_on_input_rail:
+            # Both outcomes stop the run, but they are not the same event and must not read
+            # the same. "Blocked by guardrails" sends someone to look for the policy their
+            # request tripped; when the rail never got to judge it, the thing to fix is the
+            # rail's own dependency, and the message has to say so or the search starts in
+            # the wrong place.
+            broke = next((f for f in result.findings if f.rule in ("rail_error", "rails_unavailable")), None)
             raise GuardrailViolation(
-                "Request blocked by input guardrails",
+                f"Input guardrails could not be evaluated: {broke.detail}"
+                if broke
+                else "Request blocked by input guardrails",
                 details={"findings": findings, "reason": result.reason},
+                code="guardrail_unavailable" if broke else None,
             )
 
 

@@ -42,6 +42,11 @@ log = get_logger("llm.router")
 
 CostSink = Callable[[dict[str, Any]], Any]
 
+#: Statuses that mean "not this model", as distinct from "not right now". OpenAI answers
+#: 404 for a model the account cannot reach; 403 carries the same meaning when the id is
+#: real but unentitled.
+_MODEL_REJECTED_STATUSES = frozenset({403, 404})
+
 #: The variable an operator has to set for each provider. "Unavailable" on its own leaves
 #: them guessing which of nine credentials is the missing one.
 PROVIDER_KEY_ENV_VARS: dict[str, str] = {
@@ -61,6 +66,12 @@ class ModelRouter:
     def __init__(self) -> None:
         self._providers: dict[str, LLMProvider] = {}
         self._cost_sinks: list[CostSink] = []
+        #: Models the provider itself has said it does not serve to this account. The
+        #: catalogue is a static price list, so it lists models an account may have no
+        #: entitlement to; only the provider can settle that, and it settles it the same
+        #: way on every call. Remembering the answer keeps selection away from a model
+        #: that can never work, instead of re-deriving the same 404 on every request.
+        self._unavailable_models: dict[str, str] = {}
         self._build()
 
     def _build(self) -> None:
@@ -77,6 +88,8 @@ class ModelRouter:
         }
 
     def reload(self) -> None:
+        # New credentials may carry different entitlements, so last run's answers expire.
+        self._unavailable_models.clear()
         self._build()
 
     def register_cost_sink(self, sink: CostSink) -> None:
@@ -90,7 +103,7 @@ class ModelRouter:
         """Providers whose settings are present. Says nothing about whether they work."""
         return [name for name, p in self._providers.items() if p.configured]
 
-    def usable_providers(self) -> list[str]:
+    def usable_providers(self, *, embeddings: bool | None = False) -> list[str]:
         """Providers that are configured *and* not currently circuit-broken.
 
         `configured` only means the settings are non-empty, so a rotated, mistyped or
@@ -99,13 +112,46 @@ class ModelRouter:
         """
         from app.core.resilience import get_breaker
 
-        return [name for name in self.configured_providers() if get_breaker(f"llm:{name}").state != "open"]
+        return [
+            name
+            for name in self.configured_providers()
+            if get_breaker(f"llm:{name}").state != "open" and self._has_serviceable_model(name, embeddings)
+        ]
+
+    def _has_serviceable_model(self, provider: str, embeddings: bool | None = False) -> bool:
+        """False once the provider has disowned every model of this kind that it lists.
+
+        A key that authenticates but is entitled to nothing is, for the question "can this
+        call succeed", the same as no key at all -- and callers that fail closed on an
+        unusable provider need it reported unusable rather than merely broken. The kind
+        matters: an account entitled to embeddings but no chat model is usable for one and
+        not the other, and collapsing that distinction takes embeddings down with chat.
+        """
+        return any(
+            m.provider == provider
+            and m.id not in self._unavailable_models
+            and (embeddings is None or m.is_embedding == embeddings)
+            for m in CATALOG.values()
+        )
+
+    def mark_model_unavailable(self, model_id: str, reason: str) -> None:
+        if model_id in self._unavailable_models:
+            return
+        self._unavailable_models[model_id] = reason
+        log.error("model_unavailable", model=model_id, reason=reason[:200])
+
+    def unavailable_models(self) -> dict[str, str]:
+        return dict(self._unavailable_models)
 
     def available_models(
         self, *, embeddings: bool | None = None, usable_only: bool = False
     ) -> list[ModelSpec]:
-        configured = set(self.usable_providers() if usable_only else self.configured_providers())
-        models = [m for m in CATALOG.values() if m.provider in configured]
+        configured = set(
+            self.usable_providers(embeddings=embeddings) if usable_only else self.configured_providers()
+        )
+        models = [
+            m for m in CATALOG.values() if m.provider in configured and m.id not in self._unavailable_models
+        ]
         if embeddings is True:
             return [m for m in models if m.is_embedding]
         if embeddings is False:
@@ -138,9 +184,17 @@ class ModelRouter:
                     f"Unknown model '{model}'", details={"known_models": sorted(CATALOG)[:40]}
                 )
             provider = self._providers.get(spec.provider)
-            if provider and provider.configured:
+            if spec.id in self._unavailable_models:
+                # Honouring the pin here would hand back the same 404 on every request.
+                log.warning(
+                    "model_unavailable_falling_through",
+                    model=spec.id,
+                    reason=self._unavailable_models[spec.id][:200],
+                )
+            elif provider and provider.configured:
                 return spec
-            log.warning("model_provider_unconfigured", model=model, provider=spec.provider)
+            else:
+                log.warning("model_provider_unconfigured", model=model, provider=spec.provider)
 
         # Prefer providers that can actually be called. Falling back to the merely-configured
         # set matters: when every breaker is open the caller should reach the provider and get
@@ -161,6 +215,21 @@ class ModelRouter:
             candidates = affordable or candidates
         if not candidates:
             wanted = resolve_model(model) if model else None
+            retired = self._unavailable_models
+            # Telling an operator to set a key they have already set sends them to fix the
+            # wrong thing. If the catalogue emptied because the provider disowned the
+            # models, say that instead -- the fix is an entitlement, not a credential.
+            if retired and self.configured_providers():
+                raise ProviderNotConfiguredError(
+                    "Every model this account can be offered was refused by its provider",
+                    details={
+                        "refused": {k: v[:180] for k, v in list(retired.items())[:8]},
+                        "configured_providers": self.configured_providers(),
+                        "hint": "Check the model entitlements on the key, or set DEFAULT_MODEL "
+                        "and GUARDRAILS_MODEL to a model the account can actually call.",
+                        "requested_model": model,
+                    },
+                )
             raise ProviderNotConfiguredError(
                 f"No provider is configured for model '{model}'"
                 if wanted
@@ -288,6 +357,12 @@ class ModelRouter:
                 last_error = exc
                 llm_errors_total.labels(candidate.provider, candidate.id, type(exc).__name__).inc()
                 log.error("llm_call_failed", model=candidate.id, provider=candidate.provider, error=str(exc))
+                # A 404 on a completion is the provider disowning the model id, not a fault
+                # in the request or a passing outage. Retrying it or trying it again next
+                # request only reproduces it, and while the model stays selectable every
+                # caller that fails closed on a model error stays broken.
+                if isinstance(exc, ProviderError) and exc.provider_status in _MODEL_REJECTED_STATUSES:
+                    self.mark_model_unavailable(candidate.id, str(exc))
         assert last_error is not None
         raise last_error
 
