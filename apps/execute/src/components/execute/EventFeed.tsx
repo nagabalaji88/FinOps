@@ -6,7 +6,7 @@
  * sent and the result that came back.
  */
 import { useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'motion/react'
 import {
   ArrowPathIcon,
   BoltIcon,

@@ -6,7 +6,7 @@
  * events streamed over SSE, and the durable execution record read back at the end.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'motion/react'
 import {
   ArrowPathIcon,
   ClipboardDocumentIcon,

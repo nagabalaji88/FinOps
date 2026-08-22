@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { ChevronRightIcon } from '@heroicons/react/24/outline'
 import { type Span, type Trace, Badge, JsonView, cn, copyToClipboard, formatCurrency, formatDuration } from '@finops/shared'
 

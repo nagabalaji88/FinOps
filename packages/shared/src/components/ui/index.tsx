@@ -1,5 +1,5 @@
 /** Minimal glass design-system primitives shared across the console. */
-import { motion, useReducedMotion, useSpring, useTransform, type HTMLMotionProps } from 'framer-motion'
+import { motion, useReducedMotion, useSpring, useTransform, type HTMLMotionProps } from 'motion/react'
 import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import * as TabsPrimitive from '@radix-ui/react-tabs'
 import * as DialogPrimitive from '@radix-ui/react-dialog'

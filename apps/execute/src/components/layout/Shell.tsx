@@ -4,7 +4,7 @@
  * Two destinations, so navigation is a pair of tabs in the header rather than a sidebar.
  */
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'motion/react'
 import {
   ArrowRightOnRectangleIcon,
   ChartBarIcon,

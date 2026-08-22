@@ -8,7 +8,7 @@
  * dragged, and flies to a marker when one is selected elsewhere on the page.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { geoDistance, geoGraticule10, geoOrthographic, geoPath } from 'd3-geo'
 import { feature, mesh } from 'topojson-client'
 import type { GeometryCollection, Topology } from 'topojson-specification'

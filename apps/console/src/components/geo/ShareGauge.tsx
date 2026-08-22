@@ -1,5 +1,5 @@
 /** A ring gauge that draws itself on mount — used for share-of-book percentages. */
-import { motion, useReducedMotion } from 'framer-motion'
+import { motion, useReducedMotion } from 'motion/react'
 import { AnimatedNumber } from '@finops/shared'
 
 export function ShareGauge({

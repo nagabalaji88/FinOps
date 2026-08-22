@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 
-// jsdom does not implement matchMedia, and both the theme store and framer-motion's
+// jsdom does not implement matchMedia, and both the theme store and Motion's
 // reduced-motion hook ask for it.
 if (typeof window !== 'undefined' && !window.matchMedia) {
   window.matchMedia = ((query: string) => ({

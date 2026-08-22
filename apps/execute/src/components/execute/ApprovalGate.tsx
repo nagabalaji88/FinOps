@@ -6,7 +6,7 @@
  * who has to decide instead, while the panel waits for that decision.
  */
 import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { HandRaisedIcon } from '@heroicons/react/24/outline'
 import { Badge, Button, JsonView, Spinner, useAuth, type Approval } from '@finops/shared'
 
