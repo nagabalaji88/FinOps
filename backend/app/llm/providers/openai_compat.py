@@ -16,6 +16,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.errors import ProviderError, ProviderNotConfiguredError
+from app.core.redaction import redact_provider_body
 from app.llm.base import (
     LLMProvider,
     estimate_tokens,
@@ -161,8 +162,9 @@ class OpenAICompatProvider(LLMProvider):
         latency = (time.perf_counter() - started) * 1000
         if resp.status_code >= 400:
             raise ProviderError(
-                f"{self.name} returned {resp.status_code}",
-                details={"body": resp.text[:1200], "model": model},
+                f"{self.name} returned {resp.status_code}: {redact_provider_body(resp.text)}",
+                details={"model": model},
+                provider_status=resp.status_code,
             )
         data = resp.json()
         choice = (data.get("choices") or [{}])[0]
@@ -226,8 +228,11 @@ class OpenAICompatProvider(LLMProvider):
             "POST", self._chat_url(model), headers=self._headers(), json=payload
         ) as resp:
             if resp.status_code >= 400:
-                body = (await resp.aread()).decode()[:1200]
-                raise ProviderError(f"{self.name} stream failed {resp.status_code}", details={"body": body})
+                body = redact_provider_body(await resp.aread())
+                raise ProviderError(
+                    f"{self.name} stream failed {resp.status_code}: {body}",
+                    provider_status=resp.status_code,
+                )
             request_id = resp.headers.get("x-request-id")
             async for line in resp.aiter_lines():
                 if not line or not line.startswith("data:"):
@@ -295,7 +300,8 @@ class OpenAICompatProvider(LLMProvider):
         resp = await http_client().post(self._embed_url(model), headers=self._headers(), json=payload)
         if resp.status_code >= 400:
             raise ProviderError(
-                f"{self.name} embedding failed {resp.status_code}", details={"body": resp.text[:800]}
+                f"{self.name} embedding failed {resp.status_code}: {redact_provider_body(resp.text)}",
+                provider_status=resp.status_code,
             )
         data = resp.json()
         vectors = [item["embedding"] for item in sorted(data["data"], key=lambda d: d["index"])]

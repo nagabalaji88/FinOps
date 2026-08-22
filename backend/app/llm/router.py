@@ -24,6 +24,7 @@ from app.core.resilience import CircuitBreaker as Breaker
 from app.core.resilience import RetryPolicy, get_breaker, with_retry
 from app.llm.base import LLMProvider
 from app.llm.catalog import CATALOG, ModelSpec, compute_cost, resolve_model
+from app.llm.jsonio import extract_json_object
 from app.llm.providers.anthropic import AnthropicProvider
 from app.llm.providers.bedrock import BedrockProvider
 from app.llm.providers.google import GoogleProvider
@@ -40,6 +41,20 @@ from app.llm.types import EmbeddingResult, LLMResponse, Message, StreamChunk, To
 log = get_logger("llm.router")
 
 CostSink = Callable[[dict[str, Any]], Any]
+
+#: The variable an operator has to set for each provider. "Unavailable" on its own leaves
+#: them guessing which of nine credentials is the missing one.
+PROVIDER_KEY_ENV_VARS: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "azure_openai": "AZURE_OPENAI_API_KEY (and AZURE_OPENAI_ENDPOINT)",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "google": "GOOGLE_API_KEY",
+    "bedrock": "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "ollama": "OLLAMA_BASE_URL",
+}
 
 
 class ModelRouter:
@@ -86,8 +101,10 @@ class ModelRouter:
 
         return [name for name in self.configured_providers() if get_breaker(f"llm:{name}").state != "open"]
 
-    def available_models(self, *, embeddings: bool | None = None) -> list[ModelSpec]:
-        configured = set(self.configured_providers())
+    def available_models(
+        self, *, embeddings: bool | None = None, usable_only: bool = False
+    ) -> list[ModelSpec]:
+        configured = set(self.usable_providers() if usable_only else self.configured_providers())
         models = [m for m in CATALOG.values() if m.provider in configured]
         if embeddings is True:
             return [m for m in models if m.is_embedding]
@@ -125,7 +142,13 @@ class ModelRouter:
                 return spec
             log.warning("model_provider_unconfigured", model=model, provider=spec.provider)
 
-        candidates = self.available_models(embeddings=embeddings)
+        # Prefer providers that can actually be called. Falling back to the merely-configured
+        # set matters: when every breaker is open the caller should reach the provider and get
+        # its real error back, rather than a "nothing is configured" message naming credentials
+        # that are in fact already set.
+        candidates = self.available_models(embeddings=embeddings, usable_only=True)
+        if not candidates:
+            candidates = self.available_models(embeddings=embeddings)
         if needs_tools:
             candidates = [m for m in candidates if m.supports_tools]
         if needs_vision:
@@ -137,12 +160,16 @@ class ModelRouter:
             affordable = [m for m in candidates if m.input_price_per_mtok <= max_cost_per_mtok]
             candidates = affordable or candidates
         if not candidates:
+            wanted = resolve_model(model) if model else None
             raise ProviderNotConfiguredError(
-                "No LLM provider is configured",
+                f"No provider is configured for model '{model}'"
+                if wanted
+                else "No LLM provider is configured",
                 details={
-                    "hint": "Set at least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, "
-                    "AZURE_OPENAI_API_KEY, AWS_ACCESS_KEY_ID, MISTRAL_API_KEY, "
-                    "DEEPSEEK_API_KEY, TOGETHER_API_KEY or OLLAMA_BASE_URL",
+                    "set_one_of": sorted(set(PROVIDER_KEY_ENV_VARS.values())),
+                    "required_for_requested_model": (
+                        PROVIDER_KEY_ENV_VARS.get(wanted.provider) if wanted else None
+                    ),
                     "requested_model": model,
                 },
             )
@@ -155,9 +182,11 @@ class ModelRouter:
         return candidates[0]
 
     def fallback_chain(self, spec: ModelSpec, *, needs_tools: bool) -> list[ModelSpec]:
+        # A fallback exists to route around a failing provider, so one that is already
+        # circuit-open is not a fallback -- dispatching to it only adds a rejection.
         others = [
             m
-            for m in self.available_models(embeddings=spec.is_embedding)
+            for m in self.available_models(embeddings=spec.is_embedding, usable_only=True)
             if m.id != spec.id and m.tier == spec.tier and (m.supports_tools or not needs_tools)
         ]
         others.sort(key=lambda m: m.input_price_per_mtok + m.output_price_per_mtok)
@@ -261,6 +290,45 @@ class ModelRouter:
                 log.error("llm_call_failed", model=candidate.id, provider=candidate.provider, error=str(exc))
         assert last_error is not None
         raise last_error
+
+    async def chat_json(
+        self, *, messages: list[Message], **kwargs: Any
+    ) -> tuple[dict[str, Any] | None, LLMResponse]:
+        """Chat and parse an object out of the reply, with one corrective call if needed.
+
+        The repair round-trip is worth its cost: the alternative is a caller that silently
+        falls back to an empty structure, which produces a plausible-looking run with none of
+        the requested reasoning in it and no error to explain why. The returned response
+        carries the summed tokens and cost of both calls -- charging only the second would
+        under-report the run.
+        """
+        kwargs.setdefault("json_mode", True)
+        response = await self.chat(messages=messages, **kwargs)
+        parsed = extract_json_object(response.content)
+        if parsed is not None:
+            return parsed, response
+
+        log.warning("json_reply_unparseable", model=response.model, chars=len(response.content or ""))
+        repair = await self.chat(
+            messages=[
+                *messages,
+                Message(role="assistant", content=response.content or ""),
+                Message(
+                    role="user",
+                    content=(
+                        "That reply was not valid JSON. Reply again with the same content as a "
+                        "single JSON object and nothing else -- no prose, no code fence."
+                    ),
+                ),
+            ],
+            **kwargs,
+        )
+        repair.usage.input_tokens += response.usage.input_tokens
+        repair.usage.output_tokens += response.usage.output_tokens
+        repair.usage.cached_input_tokens += response.usage.cached_input_tokens
+        repair.cost_usd += response.cost_usd
+        repair.latency_ms += response.latency_ms
+        return extract_json_object(repair.content), repair
 
     async def stream(
         self,

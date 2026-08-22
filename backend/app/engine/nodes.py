@@ -36,6 +36,7 @@ from app.guardrails.patterns import (
 from app.guardrails.patterns import (
     mask as _mask,
 )
+from app.llm.jsonio import extract_json_object
 from app.llm.router import router
 from app.llm.types import Message, ToolCall
 from app.rag.pipeline import pipeline
@@ -244,12 +245,11 @@ class PlannerNode(Node):
             f"User request:\n{json.dumps(state.input, default=str)[:4000]}"
         )
         try:
-            response = await router.chat(
+            plan, response = await router.chat_json(
                 messages=[Message(role="user", content=prompt)],
                 model=ctx.agent.planner_model or state.model,
                 temperature=0.0,
                 max_tokens=900,
-                json_mode=True,
                 context={
                     "execution_id": state.execution_id,
                     "agent_key": state.agent_key,
@@ -269,7 +269,7 @@ class PlannerNode(Node):
             cached=response.usage.cached_input_tokens,
             cost=response.cost_usd,
         )
-        plan = _parse_json(response.content) or {
+        plan = plan or {
             "objective": str(state.input.get("query") or state.input.get("objective") or "")[:400],
             "steps": [],
             "required_tools": [],
@@ -296,20 +296,8 @@ class PlannerNode(Node):
 
 
 def _parse_json(text: str) -> dict[str, Any] | None:
-    text = (text or "").strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.S)
-    try:
-        value = json.loads(text)
-        return value if isinstance(value, dict) else None
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.S)
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
-                return None
-    return None
+    """Kept as the module-local name; the scan itself is shared with the router."""
+    return extract_json_object(text)
 
 
 # --- 2. Retriever -------------------------------------------------------------

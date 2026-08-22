@@ -15,6 +15,12 @@ from typing import Any
 import pytest
 import pytest_asyncio
 
+# Read before app.core.config is imported. Clearing os.environ below cannot reach a .env file
+# on disk, so without this a developer's working configuration -- real provider keys, a real
+# database URL -- leaks into the suite and the isolation the rest of this block sets up is
+# only partial.
+os.environ["FINOPS_IGNORE_DOTENV"] = "1"
+
 os.environ.setdefault("ENVIRONMENT", "local")
 os.environ.setdefault("LOG_JSON", "false")
 os.environ.setdefault("LOG_LEVEL", "WARNING")

@@ -589,6 +589,7 @@ implement a control, name the rule it implements.
 | `docs/CREDIT_AND_COLLECTIONS.md` | The lending models in detail |
 | `docs/PAYMENTS.md` | ISO 20022, screening, the wire-stripping refusals, harmonised TAT |
 | `docs/GUARDRAILS.md` | Every rail, the fail-closed rules, degradation |
+| `docs/LLM_LAYER.md` | Provider selection, failure classification, redaction, JSON repair |
 | `docs/VALIDATION.md` | The conformance harness and all 28 scenarios |
 | `docs/API.md` | Endpoint reference |
 | `docs/SECURITY.md` | Authn/authz, RBAC, audit, secrets |

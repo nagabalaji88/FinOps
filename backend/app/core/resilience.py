@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
-from app.core.errors import CircuitOpenError, RateLimitError
+from app.core.errors import CircuitOpenError, RateLimitError, is_transient
 from app.core.logging import get_logger
 from app.core.metrics import circuit_state
 
@@ -25,6 +25,13 @@ class RetryPolicy:
     jitter: float = 0.25
     retry_on: tuple[type[BaseException], ...] = (Exception,)
     give_up_on: tuple[type[BaseException], ...] = ()
+    #: Consult :func:`is_transient` before spending an attempt. Type membership alone cannot
+    #: separate a 401 from a 503 -- both arrive as ``ProviderError`` -- and retrying the 401
+    #: costs the full ladder to arrive at the same rejection.
+    only_if_transient: bool = True
+
+    def should_retry(self, exc: BaseException) -> bool:
+        return is_transient(exc) if self.only_if_transient else True
 
     def delay_for(self, attempt: int) -> float:
         raw = min(self.base_delay * (2 ** (attempt - 1)), self.max_delay)
@@ -47,7 +54,7 @@ async def with_retry(
             raise
         except policy.retry_on as exc:  # type: ignore[misc]
             last = exc
-            if attempt >= policy.max_attempts:
+            if attempt >= policy.max_attempts or not policy.should_retry(exc):
                 break
             if on_retry:
                 on_retry(attempt, exc)
@@ -136,8 +143,16 @@ class CircuitBreaker:
             result = await fn()
         except CircuitOpenError:
             raise
-        except Exception:
-            await self._failure()
+        except Exception as exc:
+            # A breaker measures whether the dependency is reachable, not whether the caller
+            # got what it wanted. A rejected key answers the first question with "yes" -- and
+            # counting it as an outage replaces the one error message that says how to fix it
+            # with `Circuit is open` for every caller until the recovery window elapses.
+            if is_transient(exc):
+                await self._failure()
+            else:
+                async with self._lock:
+                    self.total_failures += 1
             raise
         await self._success()
         return result

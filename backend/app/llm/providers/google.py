@@ -10,6 +10,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.errors import ProviderError, ProviderNotConfiguredError
+from app.core.redaction import redact_provider_body
 from app.llm.base import LLMProvider, estimate_tokens, http_client
 from app.llm.types import EmbeddingResult, LLMResponse, Message, ToolCall, ToolSchema, Usage
 
@@ -111,7 +112,9 @@ class GoogleProvider(LLMProvider):
         latency = (time.perf_counter() - started) * 1000
         if resp.status_code >= 400:
             raise ProviderError(
-                f"Gemini returned {resp.status_code}", details={"body": resp.text[:1200], "model": model}
+                f"Gemini returned {resp.status_code}: {redact_provider_body(resp.text)}",
+                details={"model": model},
+                provider_status=resp.status_code,
             )
         data = resp.json()
         candidate = (data.get("candidates") or [{}])[0]
@@ -153,7 +156,8 @@ class GoogleProvider(LLMProvider):
         resp = await http_client().post(url, params={"key": settings.google_api_key}, json=payload)
         if resp.status_code >= 400:
             raise ProviderError(
-                f"Gemini embedding failed {resp.status_code}", details={"body": resp.text[:800]}
+                f"Gemini embedding failed {resp.status_code}: {redact_provider_body(resp.text)}",
+                provider_status=resp.status_code,
             )
         data = resp.json()
         vectors = [e["values"] for e in data.get("embeddings", [])]

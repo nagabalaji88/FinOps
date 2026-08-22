@@ -9,15 +9,22 @@ Nothing is faked -- a capability that requires an unconfigured provider fails lo
 from __future__ import annotations
 
 import functools
+import os
 from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+# The test suite isolates itself by clearing provider credentials out of os.environ, which a
+# dotenv file silently defeats: it is read straight off disk, so nothing removed from the
+# environment removes it. A developer with a working .env would then run a suite that reaches
+# their real providers. Setting this makes that isolation total.
+_IGNORE_DOTENV = os.getenv("FINOPS_IGNORE_DOTENV", "").lower() in {"1", "true", "yes"}
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"),
+        env_file=() if _IGNORE_DOTENV else (".env", "../.env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,

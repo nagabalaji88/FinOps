@@ -12,6 +12,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.errors import ProviderError, ProviderNotConfiguredError
+from app.core.redaction import redact_provider_body
 from app.llm.base import LLMProvider, estimate_tokens, http_client
 from app.llm.types import LLMResponse, Message, StreamChunk, ToolCall, ToolSchema, Usage
 
@@ -134,8 +135,9 @@ class AnthropicProvider(LLMProvider):
         latency = (time.perf_counter() - started) * 1000
         if resp.status_code >= 400:
             raise ProviderError(
-                f"Anthropic returned {resp.status_code}",
-                details={"body": resp.text[:1200], "model": model},
+                f"Anthropic returned {resp.status_code}: {redact_provider_body(resp.text)}",
+                details={"model": model},
+                provider_status=resp.status_code,
             )
         data = resp.json()
         text_parts: list[str] = []
@@ -152,13 +154,18 @@ class AnthropicProvider(LLMProvider):
                     )
                 )
         usage_raw = data.get("usage") or {}
+        content = "".join(text_parts)
+        # A gateway that proxies this API does not always forward the usage block. Estimating
+        # keeps the cost ledger and the per-execution budget working; reporting zero would
+        # silently make every call through that gateway free and uncapped.
         usage = Usage(
-            input_tokens=int(usage_raw.get("input_tokens", 0)),
-            output_tokens=int(usage_raw.get("output_tokens", 0)),
+            input_tokens=int(usage_raw.get("input_tokens", 0))
+            or sum(estimate_tokens(m.content or "") for m in messages),
+            output_tokens=int(usage_raw.get("output_tokens", 0)) or estimate_tokens(content),
             cached_input_tokens=int(usage_raw.get("cache_read_input_tokens", 0)),
         )
         return LLMResponse(
-            content="".join(text_parts),
+            content=content,
             model=data.get("model", model),
             provider=self.name,
             usage=usage,
@@ -198,8 +205,11 @@ class AnthropicProvider(LLMProvider):
             json=payload,
         ) as resp:
             if resp.status_code >= 400:
-                body = (await resp.aread()).decode()[:1200]
-                raise ProviderError(f"Anthropic stream failed {resp.status_code}", details={"body": body})
+                body = redact_provider_body(await resp.aread())
+                raise ProviderError(
+                    f"Anthropic stream failed {resp.status_code}: {body}",
+                    provider_status=resp.status_code,
+                )
             request_id = resp.headers.get("request-id")
             async for line in resp.aiter_lines():
                 if not line.startswith("data:"):

@@ -20,6 +20,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.errors import ProviderError, ProviderNotConfiguredError
+from app.core.redaction import redact_provider_body
 from app.llm.base import LLMProvider, estimate_tokens, http_client
 from app.llm.types import EmbeddingResult, LLMResponse, Message, ToolCall, ToolSchema, Usage
 
@@ -160,7 +161,9 @@ class BedrockProvider(LLMProvider):
         latency = (time.perf_counter() - started) * 1000
         if resp.status_code >= 400:
             raise ProviderError(
-                f"Bedrock returned {resp.status_code}", details={"body": resp.text[:1200], "path": path}
+                f"Bedrock returned {resp.status_code}: {redact_provider_body(resp.text)}",
+                details={"path": path},
+                provider_status=resp.status_code,
             )
         return resp.json(), latency, resp.headers.get("x-amzn-requestid")
 
