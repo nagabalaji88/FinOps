@@ -101,6 +101,31 @@ class ModelRouter:
 
         return [name for name in self.configured_providers() if get_breaker(f"llm:{name}").state != "open"]
 
+    def readiness(self) -> dict[str, Any]:
+        """Can a model be called right now, and if not, exactly what is missing.
+
+        Checked before work is dispatched rather than discovered inside it: without this a
+        missing credential fails every attempt of every call in the run first, which reads
+        as a provider outage and sends the operator looking for one.
+        """
+        configured = self.configured_providers()
+        usable = self.usable_providers()
+        blocked = sorted(set(configured) - set(usable))
+        return {
+            "ready": bool(usable),
+            "configured": configured,
+            "usable": usable,
+            "circuit_open": blocked,
+            "set_one_of": sorted(set(PROVIDER_KEY_ENV_VARS.values())) if not configured else [],
+            "reason": (
+                None
+                if usable
+                else "every configured provider is circuit-open"
+                if configured
+                else "no provider credential is set"
+            ),
+        }
+
     def available_models(
         self, *, embeddings: bool | None = None, usable_only: bool = False
     ) -> list[ModelSpec]:
@@ -308,7 +333,14 @@ class ModelRouter:
         if parsed is not None:
             return parsed, response
 
-        log.warning("json_reply_unparseable", model=response.model, chars=len(response.content or ""))
+        log.warning(
+            "json_reply_unparseable",
+            model=response.model,
+            chars=len(response.content or ""),
+            # The usual cause of an unparseable object is an object cut in half. Repairing
+            # under the same ceiling truncates again, so the ceiling is the thing to raise.
+            truncated=response.truncated,
+        )
         repair = await self.chat(
             messages=[
                 *messages,

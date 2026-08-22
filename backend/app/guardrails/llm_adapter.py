@@ -9,6 +9,7 @@ metering as every other model call the platform makes — and land in the same c
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
@@ -25,6 +26,43 @@ log = get_logger("guardrails.llm")
 # Rails are classifiers, not writers: deterministic and short.
 RAIL_TEMPERATURE = 0.0
 RAIL_MAX_TOKENS = 256
+
+#: A rail prompt that ends by demanding a bare verdict. Only those replies are normalised --
+#: fact-checking and dialogue tasks go through untouched.
+_ASKS_FOR_VERDICT = re.compile(r"answer\s+with\s+only\s*[\"']?\s*yes[\"']?\s*or\s*[\"']?\s*no", re.I)
+
+#: NeMo's `is_content_safe` reads only the FIRST TWO WORDS of the reply and blocks anything it
+#: does not recognise there. So "no" is allowed, and "Based on the policy, no." is refused --
+#: the model classified correctly and the request is blocked anyway, which reads to the
+#: operator as an unsafe request rather than as a parsing artifact. The rail prompt asks for a
+#: bare verdict, so extracting one is faithful to its intent; this hands NeMo the answer the
+#: prompt asked for.
+_BLOCK_TOKENS = frozenset({"yes", "unsafe", "block", "blocked", "violation", "violates"})
+_ALLOW_TOKENS = frozenset({"no", "safe", "allow", "allowed", "compliant", "permitted"})
+_NEGATORS = frozenset({"not", "isnt", "arent", "no", "never", "dont", "doesnt", "cannot", "cant"})
+
+
+def normalise_verdict(reply: str) -> str | None:
+    """Reduce a yes/no rail reply to "yes" (block) or "no" (allow).
+
+    Returns None when the reply carries no verdict at all, which is a broken classifier
+    rather than a decision about the content -- the caller decides what to do with that.
+    """
+    words = re.sub(r"[^\w\s]+", " ", (reply or "").lower()).split()
+    for index, word in enumerate(words):
+        if word in _BLOCK_TOKENS:
+            verdict = "yes"
+        elif word in _ALLOW_TOKENS:
+            verdict = "no"
+        else:
+            continue
+        # "not safe" and "no violation" invert; taking the bare token would read each of
+        # them backwards, which is the one error a rail must never make.
+        previous = words[index - 1] if index else ""
+        if previous in _NEGATORS and previous != word:
+            verdict = "no" if verdict == "yes" else "yes"
+        return verdict
+    return None
 
 
 def _to_messages(prompt: Any) -> list[Message]:
@@ -79,8 +117,9 @@ class RouterLLM:
             context={**self._context, "purpose": "guardrail"},
         )
         self._provider = response.provider
+        content = self._verdict_or_text(prompt, response.content)
         return LLMResponse(
-            content=response.content,
+            content=content,
             model=response.model,
             finish_reason="stop",
             request_id=response.request_id,
@@ -90,6 +129,27 @@ class RouterLLM:
                 total_tokens=response.usage.total,
             ),
         )
+
+    def _verdict_or_text(self, prompt: Any, content: str) -> str:
+        """Canonicalise a yes/no rail answer; pass anything else through unchanged."""
+        text = "\n".join(m.content for m in _to_messages(prompt))
+        if not _ASKS_FOR_VERDICT.search(text):
+            return content
+
+        verdict = normalise_verdict(content)
+        if verdict is None:
+            # Fail closed, but say why. A classifier that answers neither yes nor no is
+            # malfunctioning, and logging that is the difference between an operator fixing
+            # the model and an operator hunting for the policy their request supposedly hit.
+            log.warning(
+                "rail_verdict_unparseable",
+                model=self._model or "router-selected",
+                reply=(content or "")[:200],
+            )
+            return "yes"
+        if verdict != (content or "").strip().lower():
+            log.debug("rail_verdict_normalised", verdict=verdict, reply=(content or "")[:120])
+        return verdict
 
     async def stream_async(  # type: ignore[override]
         self, prompt: Any, *, stop: list[str] | None = None, **kwargs: Any

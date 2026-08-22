@@ -68,12 +68,23 @@ class LLMResponse:
     request_id: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def truncated(self) -> bool:
+        """The reply hit the output ceiling and stops mid-thought.
+
+        Nothing raises for this: it is a *successful* call that returned an unusable result,
+        so the damage surfaces later as a parse failure, or worse as an answer that reads
+        complete and is missing its conclusion. Callers that parse a reply must check it.
+        """
+        return self.finish_reason in {"length", "max_tokens", "MAX_TOKENS"}
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "content": self.content,
             "model": self.model,
             "provider": self.provider,
             "finish_reason": self.finish_reason,
+            "truncated": self.truncated,
             "latency_ms": round(self.latency_ms, 2),
             "cost_usd": round(self.cost_usd, 6),
             "request_id": self.request_id,

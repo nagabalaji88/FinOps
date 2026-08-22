@@ -24,6 +24,7 @@ from app.core.metrics import (
     queue_depth,
 )
 from app.core.otel import get_tracer
+from app.core.redaction import client_safe_error
 from app.core.resilience import Bulkhead
 from app.db.models.agents import Agent, Execution, Span
 from app.db.session import ambient_session, session_scope
@@ -77,6 +78,23 @@ class ExecutionEngine:
             )
         spec = agent_registry.get(agent_key)
         spec.validate_input(payload)
+
+        # Fail before spending. Every node past the planner needs a model, so queueing a run
+        # with no credential anywhere buys a row, a trace and a wall of retries to arrive at
+        # a message about circuit state -- which names neither the cause nor the fix. A
+        # circuit-open provider is *not* refused here: breakers half-open on their own, so
+        # that run may well succeed by the time it reaches the planner.
+        from app.llm.router import router as model_router
+
+        readiness = model_router.readiness()
+        if not readiness["configured"]:
+            raise ValidationError(
+                "No LLM provider is configured, so this agent cannot run",
+                details={
+                    "set_one_of": readiness["set_one_of"],
+                    "hint": "Put one in backend/.env, then restart the API",
+                },
+            )
 
         execution = Execution(
             agent_key=agent_key,
@@ -260,7 +278,9 @@ class ExecutionEngine:
             error_type = type(exc).__name__
         except Exception as exc:
             status = "failed"
-            error_message = str(exc)
+            # This message is persisted on the execution and served by the API, so it leaves
+            # the server. The full text, frames and all, is in the log line below.
+            error_message = client_safe_error(str(exc), reveal_internals=settings.debug)
             error_type = type(exc).__name__
             log.exception("execution_failed", execution_id=execution.id, error=str(exc))
         finally:

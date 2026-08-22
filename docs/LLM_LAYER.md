@@ -100,6 +100,48 @@ second would under-report the run. The alternative to repairing is what the plan
 do: fall back to an empty structure, producing a plausible-looking execution with none of
 the requested reasoning in it and no error to explain why.
 
+## Rail verdicts
+
+The LLM-backed rails ask a model a yes/no question and act on the answer. NeMo's
+`is_content_safe` parses that answer by looking at **the first two words only**, and anything
+it does not recognise there counts as unsafe:
+
+| Reply | First two words | Read as |
+|---|---|---|
+| `no` | `no` | allowed |
+| `Based on the policy, no.` | `based on` | **blocked** |
+| `The message is safe.` | `the message` | **blocked** |
+
+So a model that classifies correctly but phrases its verdict as a sentence — which
+instruction-following models routinely do — gets every request refused, and the operator is
+told their request violated a policy it never touched. The rails look like they are working;
+they are answering the same way to everything.
+
+`normalise_verdict()` in `app/guardrails/llm_adapter.py` extracts the verdict before NeMo sees
+it and hands over a bare `yes` or `no`. The rail prompt asks for exactly that, so this is
+faithful to its intent rather than a loosening of it. Negation is handled explicitly — "not
+safe" must not read as *safe*, which is the one mistake a rail cannot be allowed to make.
+
+A reply carrying no verdict at all is a **broken classifier, not a decision**. It still fails
+closed, but it is logged as `rail_verdict_unparseable` with the raw reply, so the remedy
+points at the model rather than at the user's request.
+
+## Truncation
+
+`LLMResponse.truncated` is true when the reply hit the output ceiling. Nothing raises: it is a
+*successful* call that returned an unusable result, so the damage surfaces later as a parse
+failure, or worse as an answer that reads complete and is missing its conclusion. It is
+recorded on the span, emitted with the LLM event, and written into the run's reasoning log —
+the person reading the answer is the one who needs to know it is unfinished.
+
+## Failing before spending
+
+`router.readiness()` answers whether a model can be called and what is missing if not.
+`ExecutionEngine.submit` consults it and refuses to queue a run when **no** provider is
+configured, naming the variables to set. A circuit-open provider is deliberately not refused:
+breakers half-open on their own, so that run may well succeed by the time it reaches the
+planner.
+
 ## Testing without a provider
 
 `tests/conftest.py` sets `FINOPS_IGNORE_DOTENV=1` before importing settings. Clearing
