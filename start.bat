@@ -224,7 +224,12 @@ if /I "%MODE%"=="reinstall" (
     )
 )
 
-if not exist "node_modules" (
+REM Installing only when node_modules is missing is right exactly once. After that every
+REM pull that changes a dependency is skipped, and the first symptom is Vite failing to
+REM resolve an import the source was updated to use -- an error that points at application
+REM code and never mentions the install that did not run. Compare against the lockfile.
+"%PY%" scripts\deps_stale.py >nul 2>&1
+if errorlevel 1 (
     echo [6/7] Installing frontend dependencies - this takes a few minutes...
     call npm install
     if errorlevel 1 (
@@ -232,7 +237,7 @@ if not exist "node_modules" (
         goto :fail
     )
 ) else (
-    echo [6/7] Frontend dependencies already installed.
+    echo [6/7] Frontend dependencies match the lockfile.
 )
 
 REM --- 6. Launch ------------------------------------------------------------
