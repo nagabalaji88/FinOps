@@ -239,19 +239,29 @@ REM --- 6. Launch ------------------------------------------------------------
 echo [7/7] Starting services in separate windows...
 echo.
 
-start "FinOps API"     cmd /k "cd /d "%~dp0backend" && .venv\Scripts\uvicorn.exe app.main:app --reload --port 8000"
+REM Hyper-V reserves blocks of TCP ports, so 8000 can refuse to bind with WinError 10013
+REM while netstat shows it free. Ask for a port that actually binds before opening a window
+REM that would only print the error and sit there. Set FINOPS_API_PORT to pin one.
+if not defined FINOPS_API_PORT set "FINOPS_API_PORT=8000"
+set "API_PORT=%FINOPS_API_PORT%"
+for /f "delims=" %%P in ('cd /d "%~dp0backend" ^&^& "%PY%" scripts\pick_port.py %FINOPS_API_PORT%') do set "API_PORT=%%P"
+
+REM The dev servers proxy /api to the API, so the port has to follow it or every request 404s.
+set "VITE_API_TARGET=http://localhost:%API_PORT%"
+
+start "FinOps API"     cmd /k "cd /d "%~dp0backend" && .venv\Scripts\uvicorn.exe app.main:app --reload --port %API_PORT%"
 
 REM Give the API a head start so the first frontend request does not race it.
 timeout /t 6 /nobreak >nul
 
-start "FinOps Execute" cmd /k "cd /d "%~dp0" && npm run dev:execute"
-start "FinOps Console" cmd /k "cd /d "%~dp0" && npm run dev:console"
+start "FinOps Execute" cmd /k "cd /d "%~dp0" && set "VITE_API_TARGET=%VITE_API_TARGET%" && npm run dev:execute"
+start "FinOps Console" cmd /k "cd /d "%~dp0" && set "VITE_API_TARGET=%VITE_API_TARGET%" && npm run dev:console"
 
 echo ===========================================================
 echo   Running.
 echo.
-echo     API           http://localhost:8000
-echo     API docs      http://localhost:8000/docs
+echo     API           http://localhost:%API_PORT%
+echo     API docs      http://localhost:%API_PORT%/docs
 echo     Execute app   http://localhost:5174
 echo     Console app   http://localhost:5173
 echo.
