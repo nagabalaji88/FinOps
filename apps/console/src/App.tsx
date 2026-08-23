@@ -13,6 +13,7 @@ const Approvals = lazy(() => import('@/pages/Approvals'))
 const Costs = lazy(() => import('@/pages/Costs'))
 const Knowledge = lazy(() => import('@/pages/Knowledge'))
 const Tools = lazy(() => import('@/pages/Tools'))
+const Models = lazy(() => import('@/pages/Models'))
 const Services = lazy(() => import('@/pages/Services'))
 const Evaluations = lazy(() => import('@/pages/Evaluations'))
 const Playground = lazy(() => import('@/pages/Playground'))
@@ -72,6 +73,7 @@ export function App() {
           <Route path="/costs" element={<Costs />} />
           <Route path="/knowledge" element={<Knowledge />} />
           <Route path="/tools" element={<Tools />} />
+          <Route path="/models" element={<Models />} />
           <Route path="/services" element={<Services />} />
           <Route path="/evaluations" element={<Evaluations />} />
           <Route path="/playground" element={<Playground />} />
