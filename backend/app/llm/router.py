@@ -95,17 +95,12 @@ class ModelRouter:
     def __init__(self) -> None:
         self._providers: dict[str, LLMProvider] = {}
         self._cost_sinks: list[CostSink] = []
-<<<<<<< HEAD
         #: Models the provider itself has said it does not serve to this account. The
         #: catalogue is a static price list, so it lists models an account may have no
         #: entitlement to; only the provider can settle that, and it settles it the same
         #: way on every call. Remembering the answer keeps selection away from a model
         #: that can never work, instead of re-deriving the same 404 on every request.
         self._unavailable_models: dict[str, str] = {}
-=======
-        #: Models the provider has rejected as nonexistent or not entitled for this account.
-        self._unavailable: dict[str, str] = {}
->>>>>>> fe4ea56e593a7d3fc9794a1cba93f7a50c77a964
         self._build()
 
     def _build(self) -> None:
@@ -205,17 +200,12 @@ class ModelRouter:
     def available_models(
         self, *, embeddings: bool | None = None, usable_only: bool = False
     ) -> list[ModelSpec]:
-<<<<<<< HEAD
         configured = set(
             self.usable_providers(embeddings=embeddings) if usable_only else self.configured_providers()
         )
         models = [
             m for m in CATALOG.values() if m.provider in configured and m.id not in self._unavailable_models
         ]
-=======
-        configured = set(self.usable_providers() if usable_only else self.configured_providers())
-        models = [m for m in CATALOG.values() if m.provider in configured and m.id not in self._unavailable]
->>>>>>> fe4ea56e593a7d3fc9794a1cba93f7a50c77a964
         if embeddings is True:
             return [m for m in models if m.is_embedding]
         if embeddings is False:
@@ -279,7 +269,6 @@ class ModelRouter:
             candidates = affordable or candidates
         if not candidates:
             wanted = resolve_model(model) if model else None
-<<<<<<< HEAD
             retired = self._unavailable_models
             # Telling an operator to set a key they have already set sends them to fix the
             # wrong thing. If the catalogue emptied because the provider disowned the
@@ -293,19 +282,6 @@ class ModelRouter:
                         "hint": "Check the model entitlements on the key, or set DEFAULT_MODEL "
                         "and GUARDRAILS_MODEL to a model the account can actually call.",
                         "requested_model": model,
-=======
-            if self._unavailable and self.configured_providers():
-                # The credentials are fine; the account cannot call any catalogued model.
-                # Saying "no provider is configured" here would send the operator to add a
-                # key they already have.
-                raise ProviderNotConfiguredError(
-                    "Every model this deployment can select has been rejected by its provider",
-                    details={
-                        "rejected": self.unavailable_models,
-                        "configured": self.configured_providers(),
-                        "hint": "Set DEFAULT_MODEL (and GUARDRAILS_MODEL) to a model the "
-                        "account may call, or grant access to one of the rejected models",
->>>>>>> fe4ea56e593a7d3fc9794a1cba93f7a50c77a964
                     },
                 )
             raise ProviderNotConfiguredError(
@@ -442,16 +418,14 @@ class ModelRouter:
                 attempted.append((candidate.id, exc))
                 llm_errors_total.labels(candidate.provider, candidate.id, type(exc).__name__).inc()
                 log.error("llm_call_failed", model=candidate.id, provider=candidate.provider, error=str(exc))
-<<<<<<< HEAD
                 # A 404 on a completion is the provider disowning the model id, not a fault
                 # in the request or a passing outage. Retrying it or trying it again next
                 # request only reproduces it, and while the model stays selectable every
-                # caller that fails closed on a model error stays broken.
-                if isinstance(exc, ProviderError) and exc.provider_status in _MODEL_REJECTED_STATUSES:
-                    self.mark_model_unavailable(candidate.id, str(exc))
-=======
+                # caller that fails closed on a model error stays broken. Matching the
+                # wording as well as the status keeps a wrong base URL -- which also answers
+                # 404 -- from retiring a model that is perfectly fine.
                 if _is_model_unavailable(exc):
-                    self.demote(candidate.id, reason=str(exc))
+                    self.mark_model_unavailable(candidate.id, str(exc))
                     if allow_fallback:
                         # The fallback chain is tier-locked, which is right for an outage --
                         # you want comparable capability. It is wrong here: a model the
@@ -463,7 +437,6 @@ class ModelRouter:
                             for m in self._by_price(embeddings=False, needs_tools=bool(tools))
                             if m.id not in tried
                         )
->>>>>>> fe4ea56e593a7d3fc9794a1cba93f7a50c77a964
         assert last_error is not None
         raise self._chain_error(attempted, last_error)
 
@@ -494,37 +467,12 @@ class ModelRouter:
             retryable=is_transient(last),
         )
 
-    # --- model availability -------------------------------------------------
-    def demote(self, model_id: str, *, reason: str) -> None:
-        """Stop selecting a model the provider says this account cannot call.
-
-        The catalogue is a price list, not an entitlement list: which of its models a given
-        key may use is between the account and the provider, and only the provider can say.
-        Without this the router re-picks the same rejected model on every call, so one
-        inaccessible entry costs a wasted round trip forever rather than once.
-        """
-        if model_id in self._unavailable:
-            return
-        self._unavailable[model_id] = reason
-        spec = resolve_model(model_id)
-        log.error(
-            "model_unavailable_for_account",
-            model=model_id,
-            provider=spec.provider if spec else "unknown",
-            reason=reason[:200],
-            hint="pin an accessible model with DEFAULT_MODEL, or GUARDRAILS_MODEL for the rails",
-        )
-
-    @property
-    def unavailable_models(self) -> dict[str, str]:
-        return dict(self._unavailable)
-
     def restore(self, model_id: str | None = None) -> None:
-        """Clear a demotion, for when access is granted without restarting the process."""
+        """Clear a retirement, for when access is granted without restarting the process."""
         if model_id is None:
-            self._unavailable.clear()
+            self._unavailable_models.clear()
         else:
-            self._unavailable.pop(model_id, None)
+            self._unavailable_models.pop(model_id, None)
 
     async def chat_json(
         self, *, messages: list[Message], **kwargs: Any

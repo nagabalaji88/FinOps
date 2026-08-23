@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from app.core.errors import (
+    AppError,
     AuthError,
     BudgetExceededError,
     CircuitOpenError,
@@ -355,8 +356,7 @@ class _RejectingProvider:
     async def chat(self, *, model: str, messages: list[Message], **kwargs):
         self.tried.append(model)
         raise ProviderError(
-            f"{self.name} returned 404: The model `{model}` does not exist "
-            "or you do not have access to it.",
+            f"{self.name} returned 404: The model `{model}` does not exist or you do not have access to it.",
             provider_status=404,
         )
 
@@ -444,7 +444,9 @@ class TestModelEntitlement:
                 messages=[Message(role="user", content="hi")], model="gpt-4o", allow_fallback=False
             )
         assert provider.tried == ["gpt-4o"]
-        with pytest.raises(Exception):
+        # Narrowed from a bare Exception: the point is that selection refuses the retired
+        # pin, and a blind catch would also pass if the call blew up for any other reason.
+        with pytest.raises(AppError):
             await router.chat(
                 messages=[Message(role="user", content="hi")], model="gpt-4o", allow_fallback=False
             )

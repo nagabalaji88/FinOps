@@ -70,7 +70,7 @@ async def list_catalogue(principal: PrincipalDep) -> dict[str, Any]:
     """The priced catalogue, with what is selected and what each model would need."""
     principal.require(Permission.SERVICE_READ)
     configured = set(model_router.configured_providers())
-    unavailable = model_router.unavailable_models
+    unavailable = model_router.unavailable_models()
     return {
         "selection": {
             "default_model": runtime_config.default_model or None,

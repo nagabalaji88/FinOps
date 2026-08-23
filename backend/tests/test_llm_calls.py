@@ -241,8 +241,8 @@ class TestInaccessibleModels:
             try:
                 await router.chat(messages=[Message(role="user", content="hi")])
             except ProviderNotConfiguredError as exc:
-                assert "rejected by its provider" in exc.message
-                assert exc.details["rejected"]
+                assert "refused by its provider" in exc.message
+                assert exc.details["refused"]
                 assert "DEFAULT_MODEL" in exc.details["hint"]
                 return
             except Exception:
@@ -273,7 +273,7 @@ class TestInaccessibleModels:
 
     def test_a_demotion_can_be_lifted_without_a_restart(self):
         router = _router_with(_Rejecting())
-        router.demote("gpt-4o", reason="test")
-        assert "gpt-4o" in router.unavailable_models
+        router.mark_model_unavailable("gpt-4o", "test")
+        assert "gpt-4o" in router.unavailable_models()
         router.restore("gpt-4o")
-        assert "gpt-4o" not in router.unavailable_models
+        assert "gpt-4o" not in router.unavailable_models()
