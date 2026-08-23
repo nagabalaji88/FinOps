@@ -13,7 +13,7 @@ import pytest
 from app.core.redaction import client_safe_error
 from app.guardrails.llm_adapter import normalise_verdict
 from app.llm.router import ModelRouter
-from app.llm.types import LLMResponse, Usage
+from app.llm.types import LLMResponse, Message, Usage
 
 
 def _response(finish_reason: str) -> LLMResponse:
@@ -166,3 +166,114 @@ class TestReadiness:
             assert state["set_one_of"] == []  # nothing to set; the key is already there
         finally:
             breaker._state = "closed"
+
+
+class _Rejecting:
+    """A provider whose account is entitled to only some of the catalogued models."""
+
+    name = "openai"
+    configured = True
+
+    def __init__(self, allowed: set[str] | None = None):
+        self.allowed = allowed or set()
+        self.calls: list[str] = []
+
+    async def chat(self, *, model: str, **_: object) -> LLMResponse:
+        from app.core.errors import ProviderError
+
+        self.calls.append(model)
+        if model in self.allowed:
+            return LLMResponse(content="ok", model=model, provider="openai", usage=Usage())
+        raise ProviderError(
+            f"openai returned 404: invalid_request_error: The model `{model}` does not exist "
+            f"or you do not have access to it.",
+            provider_status=404,
+        )
+
+
+def _router_with(provider: _Rejecting) -> ModelRouter:
+    router = ModelRouter()
+    router._providers = {"openai": provider}  # type: ignore[dict-item]
+    return router
+
+
+class TestInaccessibleModels:
+    """A catalogue is a price list, not an entitlement list. Only the provider knows which
+    of its models a given key may call, and it only says so by rejecting one."""
+
+    @pytest.mark.asyncio
+    async def test_it_reaches_the_one_model_the_account_can_call(self):
+        provider = _Rejecting(allowed={"gpt-4o"})
+        router = _router_with(provider)
+        result = await router.chat(messages=[Message(role="user", content="hi")])
+        assert result.model == "gpt-4o"
+
+    @pytest.mark.asyncio
+    async def test_a_rejected_model_is_not_tried_again(self):
+        """Otherwise one inaccessible entry costs a wasted round trip on every single call."""
+        provider = _Rejecting(allowed={"gpt-4o"})
+        router = _router_with(provider)
+        await router.chat(messages=[Message(role="user", content="hi")])
+        provider.calls.clear()
+        await router.chat(messages=[Message(role="user", content="hi")])
+        assert provider.calls == ["gpt-4o"]
+
+    @pytest.mark.asyncio
+    async def test_the_error_names_every_model_tried(self):
+        """Reporting only the last one describes a fallback the caller never asked for."""
+        from app.core.errors import ProviderError
+
+        provider = _Rejecting()
+        router = _router_with(provider)
+        with pytest.raises(ProviderError) as caught:
+            await router.chat(messages=[Message(role="user", content="hi")])
+        message = str(caught.value)
+        assert "gpt-4o-mini" in message and "gpt-5.5-mini" in message
+        assert len(caught.value.details["attempted"]) >= 2
+
+    @pytest.mark.asyncio
+    async def test_exhausting_the_catalogue_says_so_rather_than_blaming_credentials(self):
+        from app.core.errors import ProviderNotConfiguredError
+
+        provider = _Rejecting()
+        router = _router_with(provider)
+        for _ in range(6):
+            try:
+                await router.chat(messages=[Message(role="user", content="hi")])
+            except ProviderNotConfiguredError as exc:
+                assert "rejected by its provider" in exc.message
+                assert exc.details["rejected"]
+                assert "DEFAULT_MODEL" in exc.details["hint"]
+                return
+            except Exception:
+                continue
+        pytest.fail("never settled on the exhausted-catalogue error")
+
+    @pytest.mark.asyncio
+    async def test_one_call_is_bounded(self):
+        """An account entitled to nothing must fail quickly, not walk the whole catalogue."""
+        from app.core.errors import AppError
+        from app.llm.router import MAX_CANDIDATES
+
+        provider = _Rejecting()
+        router = _router_with(provider)
+        with pytest.raises(AppError):
+            await router.chat(messages=[Message(role="user", content="hi")])
+        assert len(provider.calls) <= MAX_CANDIDATES
+
+    def test_an_ordinary_failure_does_not_demote_a_model(self):
+        """A 500 or a rate limit is the provider having a bad minute, not a missing entitlement."""
+        from app.core.errors import ProviderError
+        from app.llm.router import _is_model_unavailable
+
+        assert not _is_model_unavailable(ProviderError("boom", provider_status=500))
+        assert not _is_model_unavailable(ProviderError("slow down", provider_status=429))
+        assert not _is_model_unavailable(ProviderError("bad request", provider_status=400))
+        assert _is_model_unavailable(ProviderError("The model `x` does not exist", provider_status=404))
+
+    def test_a_demotion_can_be_lifted_without_a_restart(self):
+        router = _router_with(_Rejecting())
+        router.demote("gpt-4o", reason="test")
+        assert "gpt-4o" in router.unavailable_models
+        router.restore("gpt-4o")
+        assert "gpt-4o" not in router.unavailable_models

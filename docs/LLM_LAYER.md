@@ -134,6 +134,36 @@ failure, or worse as an answer that reads complete and is missing its conclusion
 recorded on the span, emitted with the LLM event, and written into the run's reasoning log —
 the person reading the answer is the one who needs to know it is unfinished.
 
+## Models the account cannot call
+
+The catalogue is a price list, not an entitlement list. Which of its models a given key may
+use is between the account and the provider, and the provider only says so by rejecting one:
+
+```
+openai returned 404: invalid_request_error:
+The model `gpt-5.5-mini` does not exist or you do not have access to it.
+```
+
+Three things follow from that, all of them handled in `app/llm/router.py`:
+
+**A rejected model is demoted.** `demote()` records it and `available_models()` stops offering
+it, so one inaccessible entry costs a wasted round trip *once* rather than on every call for
+the life of the process. `restore()` lifts it when access is granted, without a restart.
+
+**The fallback stops being tier-locked.** A tier-locked chain is right for an outage — you
+want comparable capability — and wrong here, because a model the account may not call says
+nothing about capability, and staying inside its tier means never reaching the tier that
+works. On a rejection the queue is extended with every remaining usable model by price,
+bounded by `MAX_CANDIDATES`.
+
+**The error names every model tried.** Raising only the last failure describes a fallback the
+caller never asked for and discards why the model it *did* ask for failed — which is how
+`gpt-5.5-mini does not exist` ends up on screen when the run actually began on `gpt-4o-mini`.
+
+Once every catalogued model has been rejected, the error says exactly that and points at
+`DEFAULT_MODEL` / `GUARDRAILS_MODEL`, rather than claiming no provider is configured and
+sending the operator to add a key they already have.
+
 ## Failing before spending
 
 `router.readiness()` answers whether a model can be called and what is missing if not.

@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from app.core.config import settings
-from app.core.errors import ProviderError, ProviderNotConfiguredError
+from app.core.errors import ProviderError, ProviderNotConfiguredError, is_transient
 from app.core.logging import get_logger
 from app.core.metrics import llm_cost_usd_total, llm_errors_total, llm_latency, llm_tokens_total
 from app.core.resilience import CircuitBreaker as Breaker
@@ -56,11 +56,41 @@ PROVIDER_KEY_ENV_VARS: dict[str, str] = {
     "ollama": "OLLAMA_BASE_URL",
 }
 
+#: How a provider says "that model is not yours to call". Distinct from a wrong base URL,
+#: which also answers 404 -- hence matching the wording and not the status alone.
+_UNAVAILABLE_PHRASES = (
+    "does not exist",
+    "do not have access",
+    "does not have access",
+    "model_not_found",
+    "unknown model",
+    "no such model",
+    "not found for api version",
+    "model is not supported",
+    "invalid model",
+)
+
+
+#: Ceiling on models tried in one call. Without it an account entitled to nothing walks the
+#: whole catalogue on every request instead of failing quickly and saying so.
+MAX_CANDIDATES = 4
+
+
+def _is_model_unavailable(exc: BaseException) -> bool:
+    if not isinstance(exc, ProviderError):
+        return False
+    if exc.provider_status not in {400, 403, 404}:
+        return False
+    text = str(exc).lower()
+    return any(phrase in text for phrase in _UNAVAILABLE_PHRASES)
+
 
 class ModelRouter:
     def __init__(self) -> None:
         self._providers: dict[str, LLMProvider] = {}
         self._cost_sinks: list[CostSink] = []
+        #: Models the provider has rejected as nonexistent or not entitled for this account.
+        self._unavailable: dict[str, str] = {}
         self._build()
 
     def _build(self) -> None:
@@ -130,7 +160,7 @@ class ModelRouter:
         self, *, embeddings: bool | None = None, usable_only: bool = False
     ) -> list[ModelSpec]:
         configured = set(self.usable_providers() if usable_only else self.configured_providers())
-        models = [m for m in CATALOG.values() if m.provider in configured]
+        models = [m for m in CATALOG.values() if m.provider in configured and m.id not in self._unavailable]
         if embeddings is True:
             return [m for m in models if m.is_embedding]
         if embeddings is False:
@@ -186,6 +216,19 @@ class ModelRouter:
             candidates = affordable or candidates
         if not candidates:
             wanted = resolve_model(model) if model else None
+            if self._unavailable and self.configured_providers():
+                # The credentials are fine; the account cannot call any catalogued model.
+                # Saying "no provider is configured" here would send the operator to add a
+                # key they already have.
+                raise ProviderNotConfiguredError(
+                    "Every model this deployment can select has been rejected by its provider",
+                    details={
+                        "rejected": self.unavailable_models,
+                        "configured": self.configured_providers(),
+                        "hint": "Set DEFAULT_MODEL (and GUARDRAILS_MODEL) to a model the "
+                        "account may call, or grant access to one of the rejected models",
+                    },
+                )
             raise ProviderNotConfiguredError(
                 f"No provider is configured for model '{model}'"
                 if wanted
@@ -267,10 +310,16 @@ class ModelRouter:
         context: dict[str, Any] | None = None,
     ) -> LLMResponse:
         spec = self.select(model=model, tier=tier, needs_tools=bool(tools))
-        chain = [spec] + (self.fallback_chain(spec, needs_tools=bool(tools)) if allow_fallback else [])
+        queue = [spec] + (self.fallback_chain(spec, needs_tools=bool(tools)) if allow_fallback else [])
         last_error: Exception | None = None
+        attempted: list[tuple[str, BaseException]] = []
+        tried: set[str] = set()
 
-        for candidate in chain:
+        while queue and len(attempted) < MAX_CANDIDATES:
+            candidate = queue.pop(0)
+            if candidate.id in tried:
+                continue
+            tried.add(candidate.id)
             provider = self._providers[candidate.provider]
             breaker = get_breaker(f"llm:{candidate.provider}", failure_threshold=5, recovery_seconds=30)
 
@@ -311,10 +360,83 @@ class ModelRouter:
                 return response
             except Exception as exc:
                 last_error = exc
+                attempted.append((candidate.id, exc))
                 llm_errors_total.labels(candidate.provider, candidate.id, type(exc).__name__).inc()
                 log.error("llm_call_failed", model=candidate.id, provider=candidate.provider, error=str(exc))
+                if _is_model_unavailable(exc):
+                    self.demote(candidate.id, reason=str(exc))
+                    if allow_fallback:
+                        # The fallback chain is tier-locked, which is right for an outage --
+                        # you want comparable capability. It is wrong here: a model the
+                        # account may not call says nothing about capability, and staying in
+                        # its tier means never reaching the tier that does work. Any usable
+                        # model beats no answer.
+                        queue.extend(
+                            m
+                            for m in self._by_price(embeddings=False, needs_tools=bool(tools))
+                            if m.id not in tried
+                        )
         assert last_error is not None
-        raise last_error
+        raise self._chain_error(attempted, last_error)
+
+    def _by_price(self, *, embeddings: bool, needs_tools: bool) -> list[ModelSpec]:
+        models = [
+            m
+            for m in self.available_models(embeddings=embeddings, usable_only=True)
+            if m.supports_tools or not needs_tools
+        ]
+        models.sort(key=lambda m: m.input_price_per_mtok + m.output_price_per_mtok)
+        return models
+
+    @staticmethod
+    def _chain_error(attempted: list[tuple[str, BaseException]], last: BaseException) -> BaseException:
+        """One error naming every model that was tried, not just whichever failed last.
+
+        Raising only the last one describes a model the caller never asked for -- the fallback
+        -- and silently discards why the model it *did* ask for failed. Someone reading
+        "gpt-5.5-mini does not exist" has no way to know a different model was tried first, so
+        they go looking for the wrong problem.
+        """
+        if len(attempted) < 2:
+            return last
+        detail = "; ".join(f"{model}: {exc}" for model, exc in attempted)
+        return ProviderError(
+            f"All {len(attempted)} candidate models failed - {detail}",
+            details={"attempted": [model for model, _ in attempted]},
+            retryable=is_transient(last),
+        )
+
+    # --- model availability -------------------------------------------------
+    def demote(self, model_id: str, *, reason: str) -> None:
+        """Stop selecting a model the provider says this account cannot call.
+
+        The catalogue is a price list, not an entitlement list: which of its models a given
+        key may use is between the account and the provider, and only the provider can say.
+        Without this the router re-picks the same rejected model on every call, so one
+        inaccessible entry costs a wasted round trip forever rather than once.
+        """
+        if model_id in self._unavailable:
+            return
+        self._unavailable[model_id] = reason
+        spec = resolve_model(model_id)
+        log.error(
+            "model_unavailable_for_account",
+            model=model_id,
+            provider=spec.provider if spec else "unknown",
+            reason=reason[:200],
+            hint="pin an accessible model with DEFAULT_MODEL, or GUARDRAILS_MODEL for the rails",
+        )
+
+    @property
+    def unavailable_models(self) -> dict[str, str]:
+        return dict(self._unavailable)
+
+    def restore(self, model_id: str | None = None) -> None:
+        """Clear a demotion, for when access is granted without restarting the process."""
+        if model_id is None:
+            self._unavailable.clear()
+        else:
+            self._unavailable.pop(model_id, None)
 
     async def chat_json(
         self, *, messages: list[Message], **kwargs: Any
