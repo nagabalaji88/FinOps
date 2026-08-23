@@ -6,6 +6,7 @@ import hashlib
 import random
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select
@@ -48,9 +49,49 @@ log = get_logger("bootstrap")
 
 
 async def ensure_schema() -> None:
-    """Create tables when running without Alembic (local/dev/test)."""
+    """Create tables when running without Alembic (local/dev/test), and record that.
+
+    ``create_all`` builds the schema straight from the models and writes no migration
+    history, so a database made this way looks *empty* to Alembic -- no ``alembic_version``
+    row -- while every table already exists. The next ``alembic upgrade head`` then replays
+    from the initial migration and dies on "table agents already exists", which reads as a
+    corrupt database rather than as two schema paths that never spoke to each other.
+
+    Stamping closes that: the schema `create_all` produces is by definition the head of the
+    model definitions, so recording head is accurate, and it makes the dev path and the
+    migration path agree. Existing databases predate this and still need a one-off
+    ``alembic stamp head``; there is no safe way to infer their revision from here.
+    """
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_create_or_defer_to_alembic)
+
+
+def _create_or_defer_to_alembic(connection: Any) -> None:
+    """Build the schema, or stand aside when Alembic already owns it.
+
+    Only one of the two may write. Running `create_all` over a migrated database adds tables
+    *ahead* of its recorded revision, and the next `alembic upgrade head` then tries to create
+    one that already exists -- the same collision from the other direction, and harder to spot
+    because the database looks fine until the next release.
+    """
+    from alembic.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+
+    context = MigrationContext.configure(connection)
+    if context.get_current_revision() is not None:
+        log.debug("schema_managed_by_alembic", revision=context.get_current_revision())
+        return
+
+    Base.metadata.create_all(connection)
+    try:
+        script = ScriptDirectory(str(Path(__file__).resolve().parents[2] / "alembic"))
+        head = script.get_current_head()
+    except Exception as exc:  # pragma: no cover - a packaged app may ship no migrations
+        log.debug("alembic_stamp_skipped", error=str(exc))
+        return
+    if head:
+        context.stamp(script, head)
+        log.info("schema_stamped", revision=head)
 
 
 async def seed_identities(session: AsyncSession) -> dict[str, Any]:
