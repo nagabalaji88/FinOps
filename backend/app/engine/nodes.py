@@ -551,12 +551,14 @@ class ReasoningNode(Node):
                     "content": response.content[:4000],
                     "tool_calls": [tc.name for tc in response.tool_calls],
                     "finish_reason": response.finish_reason,
+                    "truncated": response.truncated,
                 },
                 attributes={
                     "model": response.model,
                     "provider": response.provider,
                     "request_id": response.request_id,
                     "latency_ms": round(response.latency_ms, 2),
+                    "truncated": response.truncated,
                 },
                 tokens_input=response.usage.input_tokens,
                 tokens_output=response.usage.output_tokens,
@@ -575,6 +577,7 @@ class ReasoningNode(Node):
                     },
                     "cost_usd": round(response.cost_usd, 6),
                     "content_preview": response.content[:600],
+                    "truncated": response.truncated,
                     "tool_calls": [
                         {"name": tc.name, "arguments": tc.arguments} for tc in response.tool_calls
                     ],
@@ -582,8 +585,15 @@ class ReasoningNode(Node):
                 node=self.key,
                 span_id=span.span_id,
                 log_message=f"LLM {response.model} responded in {response.latency_ms:.0f}ms "
-                f"({response.usage.total} tokens, ${response.cost_usd:.4f})",
+                f"({response.usage.total} tokens, ${response.cost_usd:.4f})"
+                + (" - CUT OFF at the output ceiling" if response.truncated else ""),
             )
+            if response.truncated:
+                # Visible in the run's own reasoning log, not only in the server log: the
+                # person reading the answer is the one who needs to know it is unfinished.
+                state.reasoning_log.append(
+                    f"Reply hit the {agent.max_tokens}-token ceiling and is incomplete."
+                )
             await ctx.session.commit()
             if response.content:
                 state.reasoning_log.append(response.content[:1500])

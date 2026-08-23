@@ -38,6 +38,28 @@ def _shorten(text: str, limit: int = _MAX) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+_TRACEBACK_HEADER = re.compile(r"Traceback \(most recent call last\):.*", re.DOTALL)
+_TRACEBACK_LINE = re.compile(r'\s*File "[^"]+", line \d+.*', re.MULTILINE)
+
+
+def client_safe_error(message: str | None, *, reveal_internals: bool = False) -> str:
+    """Strip an exception's internals while keeping the part that says what to do.
+
+    A provider SDK embeds its own frames and absolute paths inside the exception *text*, so
+    a message forwarded to an API client leaks the install layout and dependency versions
+    without any traceback being formatted. The goal is a redaction and not a blank:
+    "Missing GOOGLE_API_KEY" has to survive, or a diagnosable error becomes a shrug.
+    """
+    if reveal_internals:
+        return message or ""
+    cleaned = _TRACEBACK_HEADER.sub("", message or "")
+    cleaned = _TRACEBACK_LINE.sub("", cleaned)
+    cleaned = _scrub(cleaned)
+    if not cleaned:
+        return "The call failed. See the server log for details."
+    return _shorten(cleaned, 400)
+
+
 def redact_provider_body(body: str | bytes | None, *, limit: int = _MAX) -> str:
     """Reduce a provider's error response to the part an operator can act on.
 

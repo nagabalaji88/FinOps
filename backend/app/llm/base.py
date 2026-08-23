@@ -79,6 +79,18 @@ class LLMProvider(abc.ABC):
     async def embed(self, *, model: str, texts: list[str]) -> EmbeddingResult:
         raise NotImplementedError(f"{self.name} does not provide embeddings")
 
+    async def list_models(self) -> list[str]:
+        """Model ids this credential can actually call, asked of the provider itself.
+
+        A committed catalogue answers a different question -- what the platform knows how to
+        price -- and goes stale the moment a provider ships or retires something, or an
+        account's entitlements change. Only the provider can say what a given key may call.
+
+        Returns an empty list when the provider offers no listing endpoint, which is not an
+        error: it means "cannot enumerate", not "nothing available".
+        """
+        return []
+
     async def health(self) -> dict[str, Any]:
         return {"provider": self.name, "configured": self.configured}
 

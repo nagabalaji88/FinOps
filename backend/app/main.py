@@ -22,6 +22,7 @@ from app.core.errors import AppError
 from app.core.logging import configure_logging, get_logger, request_id_ctx, trace_id_ctx
 from app.core.metrics import http_request_duration, http_requests_total, render_metrics
 from app.core.otel import current_trace_ids, setup_tracing
+from app.core.runtime_config import runtime_config
 from app.core.secrets import secret_manager
 from app.core.storage import store
 from app.db.session import dispose_engine, engine, ping_database
@@ -70,10 +71,21 @@ async def lifespan(app: FastAPI):
         async with session_scope() as session:
             await bootstrap(session)
 
+    # Load operator overrides before anything reports what is configured, or the first status
+    # a deployment serves describes the environment rather than what will actually be called.
+    from app.db.session import session_scope as _scope
+
+    try:
+        async with _scope() as session:
+            await runtime_config.refresh(session)
+    except Exception as exc:  # a fresh database has no settings table yet
+        log.warning("runtime_config_unavailable", error=str(exc))
+
     log.info(
         "startup_complete",
         environment=settings.environment,
         providers=model_router.configured_providers(),
+        model=runtime_config.default_model or "router-selected",
         cache=cache.backend,
         storage=store.backend,
         secrets=secret_manager.backend,

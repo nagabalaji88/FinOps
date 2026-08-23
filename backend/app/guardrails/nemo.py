@@ -24,6 +24,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.runtime_config import runtime_config
 from app.guardrails.actions import DETECTORS, SEVERITY, TRANSFORMS, fail_closed
 
 log = get_logger("guardrails.nemo")
@@ -234,8 +235,11 @@ class NemoGuardrails:
         except ImportError:
             version, installed = None, False
 
+        from app.guardrails.llm_adapter import RouterLLM
         from app.llm.router import router as model_router
 
+        rail_model = RouterLLM().model_name
+        agent_model = runtime_config.default_model or "router-selected"
         agents = self.configured_agents()
         llm_rails = self._llm_rails_available() if installed else False
         configured = model_router.configured_providers()
@@ -263,6 +267,13 @@ class NemoGuardrails:
             "llm_rails_reason": _llm_rails_reason(llm_rails, configured, usable),
             "providers_configured": configured,
             "providers_usable": usable,
+            # Which model the rails judge with, and whether that is the one the agents use.
+            # Divergence here is legitimate -- rails classify, so a smaller model is often the
+            # right call -- but it should be a visible choice rather than something an
+            # operator discovers when a rail fails on a model they never selected.
+            "model": rail_model,
+            "agent_model": agent_model,
+            "aligned_with_agents": rail_model == agent_model,
             "note": None if llm_rails else "LLM-backed rails are off — deterministic rails only",
             "errors": dict(self._errors) or None,
             "required": ["nemoguardrails"] if not installed else [],
