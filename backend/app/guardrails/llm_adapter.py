@@ -86,9 +86,15 @@ class RouterLLM:
     """NeMo ``LLMModel`` backed by the platform's model router."""
 
     def __init__(self, *, model: str | None = None, context: dict[str, Any] | None = None):
-        # Empty means "let the router choose": rails must run on whatever the deployment
-        # can actually reach, not on a model named in a default that may be unavailable.
-        self._model = model or settings.guardrails_model or ""
+        # GUARDRAILS_MODEL, then DEFAULT_MODEL, then let the router choose.
+        #
+        # Falling straight through to the router when GUARDRAILS_MODEL is unset -- which is
+        # what this did, despite the setting documenting otherwise -- makes the rails pick the
+        # cheapest catalogued model independently of the agents. An operator who sets
+        # DEFAULT_MODEL to a model their key can call still gets rails on a different one,
+        # and the run fails at the rail with a model nobody chose. Alignment is the default;
+        # GUARDRAILS_MODEL stays available to put rails on something smaller on purpose.
+        self._model = model or settings.guardrails_model or settings.default_model or ""
         self._context = context or {}
         self._provider: str | None = None
 
