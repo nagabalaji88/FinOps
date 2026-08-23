@@ -13,8 +13,8 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
-from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.runtime_config import runtime_config
 from app.llm.router import router as model_router
 from app.llm.types import Message, Role
 
@@ -94,7 +94,7 @@ class RouterLLM:
         # DEFAULT_MODEL to a model their key can call still gets rails on a different one,
         # and the run fails at the rail with a model nobody chose. Alignment is the default;
         # GUARDRAILS_MODEL stays available to put rails on something smaller on purpose.
-        self._model = model or settings.guardrails_model or settings.default_model or ""
+        self._model = model or runtime_config.guardrails_model or runtime_config.default_model or ""
         self._context = context or {}
         self._provider: str | None = None
 

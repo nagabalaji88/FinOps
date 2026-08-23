@@ -95,6 +95,21 @@ class FeatureFlag(Base, UUIDMixin, TimestampMixin):
     updated_by: Mapped[str | None] = mapped_column(String(255), default=None)
 
 
+class PlatformSetting(Base, UUIDMixin, TimestampMixin):
+    """A setting an operator changed at runtime, which overrides the environment.
+
+    Deliberately not a general configuration store: only the handful of values in
+    ``runtime_config.MODEL_KEYS`` are honoured, so a stray row cannot reconfigure the
+    platform. Non-secret by construction -- credentials live in ``stored_secrets``.
+    """
+
+    __tablename__ = "platform_settings"
+
+    key: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_by: Mapped[str | None] = mapped_column(String(255), default=None)
+
+
 class StoredSecret(Base, UUIDMixin, TimestampMixin):
     """Encrypted-at-rest secret used when Vault is not configured."""
 

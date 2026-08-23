@@ -24,6 +24,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.runtime_config import runtime_config
 from app.guardrails.actions import DETECTORS, SEVERITY, TRANSFORMS, fail_closed
 
 log = get_logger("guardrails.nemo")
@@ -232,7 +233,7 @@ class NemoGuardrails:
         from app.llm.router import router as model_router
 
         rail_model = RouterLLM().model_name
-        agent_model = settings.default_model or "router-selected"
+        agent_model = runtime_config.default_model or "router-selected"
         agents = self.configured_agents()
         llm_rails = self._llm_rails_available() if installed else False
         configured = model_router.configured_providers()

@@ -13,6 +13,7 @@ import httpx
 from app.core.config import settings
 from app.core.errors import ProviderError, ProviderNotConfiguredError
 from app.core.redaction import redact_provider_body
+from app.core.runtime_config import runtime_config
 from app.llm.base import LLMProvider, estimate_tokens, http_client
 from app.llm.types import LLMResponse, Message, StreamChunk, ToolCall, ToolSchema, Usage
 
@@ -59,12 +60,17 @@ class AnthropicProvider(LLMProvider):
     name = "anthropic"
 
     @property
+    def api_key(self) -> str | None:
+        """Resolved per call, so a key set in the admin view applies without a restart."""
+        return runtime_config.api_key("anthropic")
+
+    @property
     def configured(self) -> bool:
-        return bool(settings.anthropic_api_key)
+        return bool(self.api_key)
 
     def _headers(self) -> dict[str, str]:
         return {
-            "x-api-key": settings.anthropic_api_key or "",
+            "x-api-key": self.api_key or "",
             "anthropic-version": API_VERSION,
             "content-type": "application/json",
         }
@@ -270,6 +276,19 @@ class AnthropicProvider(LLMProvider):
                 request_id=request_id,
             ),
         )
+
+    async def list_models(self) -> list[str]:
+        if not self.configured:
+            return []
+        resp = await http_client().get(
+            f"{settings.anthropic_base_url}/v1/models", headers=self._headers(), timeout=12.0
+        )
+        if resp.status_code >= 400:
+            raise ProviderError(
+                f"Anthropic model listing failed {resp.status_code}: {redact_provider_body(resp.text)}",
+                provider_status=resp.status_code,
+            )
+        return sorted({str(m.get("id")) for m in resp.json().get("data") or [] if m.get("id")})
 
     async def health(self) -> dict[str, Any]:
         info: dict[str, Any] = {

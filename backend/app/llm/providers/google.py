@@ -11,6 +11,7 @@ import httpx
 from app.core.config import settings
 from app.core.errors import ProviderError, ProviderNotConfiguredError
 from app.core.redaction import redact_provider_body
+from app.core.runtime_config import runtime_config
 from app.llm.base import LLMProvider, estimate_tokens, http_client
 from app.llm.types import EmbeddingResult, LLMResponse, Message, ToolCall, ToolSchema, Usage
 
@@ -50,8 +51,13 @@ class GoogleProvider(LLMProvider):
     name = "google"
 
     @property
+    def api_key(self) -> str | None:
+        """Resolved per call, so a key set in the admin view applies without a restart."""
+        return runtime_config.api_key("google")
+
+    @property
     def configured(self) -> bool:
-        return bool(settings.google_api_key)
+        return bool(self.api_key)
 
     def _require(self) -> None:
         if not self.configured:
@@ -103,7 +109,7 @@ class GoogleProvider(LLMProvider):
         try:
             resp = await http_client().post(
                 url,
-                params={"key": settings.google_api_key},
+                params={"key": self.api_key},
                 headers={"Content-Type": "application/json"},
                 json=payload,
             )
@@ -153,7 +159,7 @@ class GoogleProvider(LLMProvider):
         payload = {
             "requests": [{"model": f"models/{model}", "content": {"parts": [{"text": t}]}} for t in texts]
         }
-        resp = await http_client().post(url, params={"key": settings.google_api_key}, json=payload)
+        resp = await http_client().post(url, params={"key": self.api_key}, json=payload)
         if resp.status_code >= 400:
             raise ProviderError(
                 f"Gemini embedding failed {resp.status_code}: {redact_provider_body(resp.text)}",
@@ -170,6 +176,21 @@ class GoogleProvider(LLMProvider):
             latency_ms=(time.perf_counter() - started) * 1000,
         )
 
+    async def list_models(self) -> list[str]:
+        if not self.configured:
+            return []
+        resp = await http_client().get(
+            f"{settings.google_base_url}/models", params={"key": self.api_key}, timeout=12.0
+        )
+        if resp.status_code >= 400:
+            raise ProviderError(
+                f"Gemini model listing failed {resp.status_code}: {redact_provider_body(resp.text)}",
+                provider_status=resp.status_code,
+            )
+        # Gemini returns "models/gemini-2.5-pro"; the bare id is what the catalogue uses.
+        names = [str(m.get("name", "")) for m in resp.json().get("models") or []]
+        return sorted({n.removeprefix("models/") for n in names if n})
+
     async def health(self) -> dict[str, Any]:
         info: dict[str, Any] = {"provider": self.name, "configured": self.configured}
         if not self.configured:
@@ -178,7 +199,7 @@ class GoogleProvider(LLMProvider):
         try:
             started = time.perf_counter()
             resp = await http_client().get(
-                f"{settings.google_base_url}/models", params={"key": settings.google_api_key}, timeout=8.0
+                f"{settings.google_base_url}/models", params={"key": self.api_key}, timeout=8.0
             )
             info["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
             info["status"] = "healthy" if resp.status_code < 400 else "degraded"

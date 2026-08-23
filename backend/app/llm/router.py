@@ -22,6 +22,7 @@ from app.core.logging import get_logger
 from app.core.metrics import llm_cost_usd_total, llm_errors_total, llm_latency, llm_tokens_total
 from app.core.resilience import CircuitBreaker as Breaker
 from app.core.resilience import RetryPolicy, get_breaker, with_retry
+from app.core.runtime_config import runtime_config
 from app.llm.base import LLMProvider
 from app.llm.catalog import CATALOG, ModelSpec, compute_cost, resolve_model
 from app.llm.jsonio import extract_json_object
@@ -242,7 +243,7 @@ class ModelRouter:
                 },
             )
         candidates.sort(key=lambda m: m.input_price_per_mtok + m.output_price_per_mtok)
-        preferred = resolve_model(settings.default_model)
+        preferred = resolve_model(runtime_config.default_model)
         if preferred and preferred in candidates and not (tier or max_cost_per_mtok):
             return preferred
         if tier == "frontier":

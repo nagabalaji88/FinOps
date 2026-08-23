@@ -17,22 +17,9 @@ import httpx
 from app.core.config import settings
 from app.core.errors import ProviderError, ProviderNotConfiguredError
 from app.core.redaction import redact_provider_body
-from app.llm.base import (
-    LLMProvider,
-    estimate_tokens,
-    http_client,
-    messages_to_openai,
-    tools_to_openai,
-)
-from app.llm.types import (
-    EmbeddingResult,
-    LLMResponse,
-    Message,
-    StreamChunk,
-    ToolCall,
-    ToolSchema,
-    Usage,
-)
+from app.core.runtime_config import runtime_config
+from app.llm.base import LLMProvider, estimate_tokens, http_client, messages_to_openai, tools_to_openai
+from app.llm.types import EmbeddingResult, LLMResponse, Message, StreamChunk, ToolCall, ToolSchema, Usage
 
 
 class OpenAICompatProvider(LLMProvider):
@@ -41,7 +28,7 @@ class OpenAICompatProvider(LLMProvider):
         name: str,
         *,
         base_url: str | None,
-        api_key: str | None,
+        api_key: str | None = None,
         auth_style: str = "bearer",
         azure_deployment_mode: bool = False,
         api_version: str | None = None,
@@ -49,11 +36,16 @@ class OpenAICompatProvider(LLMProvider):
     ):
         self.name = name
         self.base_url = (base_url or "").rstrip("/")
-        self.api_key = api_key
+        self._static_key = api_key
         self.auth_style = auth_style
         self.azure_deployment_mode = azure_deployment_mode
         self.api_version = api_version
         self.requires_key = requires_key
+
+    @property
+    def api_key(self) -> str | None:
+        """Resolved per call, so a key rotated in the admin view applies without a restart."""
+        return runtime_config.api_key(self.name) or self._static_key
 
     @property
     def configured(self) -> bool:
@@ -230,8 +222,7 @@ class OpenAICompatProvider(LLMProvider):
             if resp.status_code >= 400:
                 body = redact_provider_body(await resp.aread())
                 raise ProviderError(
-                    f"{self.name} stream failed {resp.status_code}: {body}",
-                    provider_status=resp.status_code,
+                    f"{self.name} stream failed {resp.status_code}: {body}", provider_status=resp.status_code
                 )
             request_id = resp.headers.get("x-request-id")
             async for line in resp.aiter_lines():
@@ -317,6 +308,18 @@ class OpenAICompatProvider(LLMProvider):
             latency_ms=(time.perf_counter() - started) * 1000,
         )
 
+    async def list_models(self) -> list[str]:
+        if not self.configured:
+            return []
+        resp = await http_client().get(f"{self.base_url}/models", headers=self._headers(), timeout=12.0)
+        if resp.status_code >= 400:
+            raise ProviderError(
+                f"{self.name} model listing failed {resp.status_code}: {redact_provider_body(resp.text)}",
+                provider_status=resp.status_code,
+            )
+        data = resp.json().get("data") or []
+        return sorted({str(item.get("id")) for item in data if item.get("id")})
+
     async def health(self) -> dict[str, Any]:
         info: dict[str, Any] = {
             "provider": self.name,
@@ -339,14 +342,13 @@ class OpenAICompatProvider(LLMProvider):
 
 
 def build_openai() -> OpenAICompatProvider:
-    return OpenAICompatProvider("openai", base_url=settings.openai_base_url, api_key=settings.openai_api_key)
+    return OpenAICompatProvider("openai", base_url=settings.openai_base_url)
 
 
 def build_azure_openai() -> OpenAICompatProvider:
     return OpenAICompatProvider(
         "azure_openai",
         base_url=settings.azure_openai_endpoint,
-        api_key=settings.azure_openai_api_key,
         auth_style="api-key",
         azure_deployment_mode=True,
         api_version=settings.azure_openai_api_version,
@@ -354,28 +356,19 @@ def build_azure_openai() -> OpenAICompatProvider:
 
 
 def build_mistral() -> OpenAICompatProvider:
-    return OpenAICompatProvider(
-        "mistral", base_url=settings.mistral_base_url, api_key=settings.mistral_api_key
-    )
+    return OpenAICompatProvider("mistral", base_url=settings.mistral_base_url)
 
 
 def build_deepseek() -> OpenAICompatProvider:
-    return OpenAICompatProvider(
-        "deepseek", base_url=settings.deepseek_base_url, api_key=settings.deepseek_api_key
-    )
+    return OpenAICompatProvider("deepseek", base_url=settings.deepseek_base_url)
 
 
 def build_together() -> OpenAICompatProvider:
-    return OpenAICompatProvider(
-        "together", base_url=settings.together_base_url, api_key=settings.together_api_key
-    )
+    return OpenAICompatProvider("together", base_url=settings.together_base_url)
 
 
 def build_ollama() -> OpenAICompatProvider:
     base = settings.ollama_base_url
     return OpenAICompatProvider(
-        "ollama",
-        base_url=f"{base.rstrip('/')}/v1" if base else None,
-        api_key=None,
-        requires_key=False,
+        "ollama", base_url=f"{base.rstrip('/')}/v1" if base else None, api_key=None, requires_key=False
     )
