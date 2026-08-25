@@ -218,6 +218,29 @@ function Registry({ data, onChanged }: { data: Catalogue; onChanged: () => void 
     )
   }, [data.models, filter, showRefused])
 
+  // Grouped by provider, because that is the unit an operator reasons in: a credential is
+  // per provider, so is an outage, and so is the decision to ignore one entirely.
+  const groups = useMemo(() => {
+    const byProvider = new Map<string, CatalogueModel[]>()
+    for (const model of models) {
+      byProvider.set(model.provider, [...(byProvider.get(model.provider) ?? []), model])
+    }
+    return [...byProvider.entries()]
+      .map(([provider, rows]) => ({
+        provider,
+        rows,
+        // A provider you cannot call is the one you are least likely to be reading, so it
+        // starts closed -- but it stays listed, because "missing" and "unusable" are
+        // different problems and hiding one as the other is how an operator loses an hour.
+        usable: rows.some((r) => r.credential_available),
+      }))
+      .sort((a, b) => Number(b.usable) - Number(a.usable) || a.provider.localeCompare(b.provider))
+  }, [models])
+
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const isOpen = (group: { provider: string; usable: boolean }) =>
+    collapsed[group.provider] === undefined ? group.usable : !collapsed[group.provider]
+
   return (
     <div className="space-y-4">
       <Card>
@@ -278,90 +301,129 @@ function Registry({ data, onChanged }: { data: Catalogue; onChanged: () => void 
             </div>
           }
         />
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-line/70 text-left">
-                {['Model', 'Provider', 'Tier', 'Context', '$ / 1M in', '$ / 1M out', 'Credential', ''].map(
-                  (column, index) => (
-                    <th
-                      key={column || index}
-                      className={cn('metric-label px-3 py-2 font-medium', index > 2 && 'text-right')}
-                    >
-                      {column}
-                    </th>
-                  ),
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {models.map((model) => {
-                const result = results[model.id]
-                const isDefault = data.selection.default_model === model.id
-                return (
-                  <tr key={model.id} className="table-row border-b border-line/40 last:border-0">
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-ink">{model.display_name}</span>
-                        {isDefault ? <Badge tone="ok">in use</Badge> : null}
-                      </div>
-                      <code className="text-2xs text-ink-subtle">{model.id}</code>
-                      {result ? (
-                        <p
-                          className={cn(
-                            'mt-1 text-2xs',
-                            result.ok ? 'text-state-ok' : 'text-state-err',
+        <div className="space-y-2">
+          {groups.map((group) => {
+            const open = isOpen(group)
+            return (
+              <div key={group.provider} className="overflow-hidden rounded-lg border border-line/70">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCollapsed((previous) => ({ ...previous, [group.provider]: open }))
+                  }
+                  className="flex w-full items-center gap-2 bg-surface-muted/50 px-3 py-2 text-left hover:bg-surface-muted"
+                  aria-expanded={open}
+                >
+                  <span className={cn('text-ink-subtle transition-transform', open && 'rotate-90')}>
+                    ›
+                  </span>
+                  <span className="text-sm font-medium text-ink">{group.provider}</span>
+                  <Badge tone={group.usable ? 'ok' : 'idle'}>
+                    {group.usable ? 'key set' : 'no key'}
+                  </Badge>
+                  <span className="text-2xs text-ink-subtle">
+                    {group.rows.length} model{group.rows.length === 1 ? '' : 's'}
+                  </span>
+                  {group.rows.some((r) => r.id === data.selection.default_model) ? (
+                    <Badge tone="info">in use</Badge>
+                  ) : null}
+                </button>
+
+                {open ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-line/70 text-left">
+                          {['Model', 'Tier', 'Context', '$ / 1M in', '$ / 1M out', 'Credential', ''].map(
+                            (column, index) => (
+                              <th
+                                key={column || index}
+                                className={cn(
+                                  'metric-label px-3 py-2 font-medium',
+                                  index > 1 && 'text-right',
+                                )}
+                              >
+                                {column}
+                              </th>
+                            ),
                           )}
-                        >
-                          {result.ok
-                            ? `replied in ${result.latency_ms}ms${
-                                result.served_by && result.served_by !== model.id
-                                  ? ` — served by ${result.served_by}`
-                                  : ''
-                              }`
-                            : result.error}
-                        </p>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-2.5 text-ink-muted">{model.provider}</td>
-                    <td className="px-3 py-2.5 text-ink-muted">{model.tier}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-ink-muted">
-                      {(model.context_window / 1000).toFixed(0)}k
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-ink-muted">
-                      {money(model.input_price_per_mtok)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-ink-muted">
-                      {money(model.output_price_per_mtok)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <CredentialBadge model={model} />
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <div className="flex justify-end gap-1.5">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          loading={testing === model.id}
-                          onClick={() => void test(model.id)}
-                        >
-                          Test
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={isDefault ? 'outline' : 'primary'}
-                          disabled={isDefault || select.isPending}
-                          onClick={() => select.mutate({ default_model: model.id })}
-                        >
-                          {isDefault ? 'Selected' : 'Use'}
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.rows.map((model) => {
+                          const result = results[model.id]
+                          const isDefault = data.selection.default_model === model.id
+                          return (
+                            <tr
+                              key={model.id}
+                              className="table-row border-b border-line/40 last:border-0"
+                            >
+                              <td className="px-3 py-2.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium text-ink">{model.display_name}</span>
+                                  {isDefault ? <Badge tone="ok">in use</Badge> : null}
+                                </div>
+                                <code className="text-2xs text-ink-subtle">{model.id}</code>
+                                {result ? (
+                                  <p
+                                    className={cn(
+                                      'mt-1 text-2xs',
+                                      result.ok ? 'text-state-ok' : 'text-state-err',
+                                    )}
+                                  >
+                                    {result.ok
+                                      ? `replied in ${result.latency_ms}ms${
+                                          result.served_by && result.served_by !== model.id
+                                            ? ` — served by ${result.served_by}`
+                                            : ''
+                                        }`
+                                      : result.error}
+                                  </p>
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-2.5 text-ink-muted">{model.tier}</td>
+                              <td className="px-3 py-2.5 text-right tabular-nums text-ink-muted">
+                                {(model.context_window / 1000).toFixed(0)}k
+                              </td>
+                              <td className="px-3 py-2.5 text-right tabular-nums text-ink-muted">
+                                {money(model.input_price_per_mtok)}
+                              </td>
+                              <td className="px-3 py-2.5 text-right tabular-nums text-ink-muted">
+                                {money(model.output_price_per_mtok)}
+                              </td>
+                              <td className="px-3 py-2.5 text-right">
+                                <CredentialBadge model={model} />
+                              </td>
+                              <td className="px-3 py-2.5 text-right">
+                                <div className="flex justify-end gap-1.5">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    loading={testing === model.id}
+                                    onClick={() => void test(model.id)}
+                                  >
+                                    Test
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant={isDefault ? 'outline' : 'primary'}
+                                    disabled={isDefault || select.isPending}
+                                    onClick={() => select.mutate({ default_model: model.id })}
+                                  >
+                                    {isDefault ? 'Selected' : 'Use'}
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </div>
+            )
+          })}
         </div>
       </Card>
     </div>

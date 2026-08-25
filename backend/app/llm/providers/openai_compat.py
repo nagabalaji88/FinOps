@@ -367,6 +367,14 @@ def build_together() -> OpenAICompatProvider:
     return OpenAICompatProvider("together", base_url=settings.together_base_url)
 
 
+def build_groq() -> OpenAICompatProvider:
+    return OpenAICompatProvider("groq", base_url=settings.groq_base_url)
+
+
+def build_openrouter() -> OpenAICompatProvider:
+    return OpenAICompatProvider("openrouter", base_url=settings.openrouter_base_url)
+
+
 def build_ollama() -> OpenAICompatProvider:
     base = settings.ollama_base_url
     return OpenAICompatProvider(

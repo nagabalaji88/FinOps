@@ -118,6 +118,10 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     together_api_key: str | None = None  # Llama hosting
     together_base_url: str = "https://api.together.xyz/v1"
+    groq_api_key: str | None = None  # fast inference for open-weight models
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    openrouter_api_key: str | None = None  # one key in front of many providers
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
     ollama_base_url: str | None = None  # local Llama/Mistral
     aws_region: str = "us-east-1"
     aws_access_key_id: str | None = None

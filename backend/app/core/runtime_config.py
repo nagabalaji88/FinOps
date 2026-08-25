@@ -44,6 +44,8 @@ PROVIDER_ENV: dict[str, str] = {
     "mistral": "mistral_api_key",
     "deepseek": "deepseek_api_key",
     "together": "together_api_key",
+    "groq": "groq_api_key",
+    "openrouter": "openrouter_api_key",
 }
 
 

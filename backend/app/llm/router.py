@@ -32,9 +32,11 @@ from app.llm.providers.google import GoogleProvider
 from app.llm.providers.openai_compat import (
     build_azure_openai,
     build_deepseek,
+    build_groq,
     build_mistral,
     build_ollama,
     build_openai,
+    build_openrouter,
     build_together,
 )
 from app.llm.types import EmbeddingResult, LLMResponse, Message, StreamChunk, ToolSchema
@@ -59,6 +61,8 @@ PROVIDER_KEY_ENV_VARS: dict[str, str] = {
     "mistral": "MISTRAL_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
     "together": "TOGETHER_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
     "ollama": "OLLAMA_BASE_URL",
 }
 
@@ -113,6 +117,8 @@ class ModelRouter:
             "mistral": build_mistral(),
             "deepseek": build_deepseek(),
             "together": build_together(),
+            "groq": build_groq(),
+            "openrouter": build_openrouter(),
             "ollama": build_ollama(),
         }
 

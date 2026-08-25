@@ -20,6 +20,8 @@ Provider = Literal[
     "mistral",
     "deepseek",
     "together",
+    "groq",
+    "openrouter",
     "ollama",
 ]
 
@@ -135,6 +137,27 @@ _register(
               327_680, 8_192, 0.18, 0.59, supports_vision=True, tier="fast"),
     ModelSpec("llama3.1", "ollama", "Llama 3.1 (local)", "llama", 128_000, 8_192, 0.0, 0.0,
               tier="fast", tags=("self-hosted",)),
+)
+
+# --- Groq --------------------------------------------------------------------
+# OpenAI-compatible wire format at a different base URL, so the same client serves it.
+_register(
+    ModelSpec("openai/gpt-oss-120b", "groq", "GPT-OSS 120B (Groq)", "gpt-oss", 128_000, 32_768,
+              0.15, 0.75, tier="balanced", tags=("open-weight",)),
+    ModelSpec("openai/gpt-oss-20b", "groq", "GPT-OSS 20B (Groq)", "gpt-oss", 128_000, 32_768,
+              0.10, 0.50, tier="fast", tags=("open-weight",)),
+)
+
+# --- OpenRouter --------------------------------------------------------------
+# One credential in front of many providers; ids carry the upstream vendor as a prefix.
+_register(
+    ModelSpec("meta-llama/llama-3.3-70b-instruct", "openrouter", "Llama 3.3 70B (OpenRouter)",
+              "llama", 131_072, 8_192, 0.10, 0.32, tier="balanced"),
+    ModelSpec("mistralai/mistral-small-3.2-24b-instruct", "openrouter",
+              "Mistral Small 3.2 24B (OpenRouter)", "mistral", 131_072, 8_192, 0.09, 0.25,
+              tier="fast"),
+    ModelSpec("deepseek/deepseek-chat", "openrouter", "DeepSeek Chat (OpenRouter)", "deepseek",
+              128_000, 8_192, 0.26, 1.03, tier="balanced"),
     ModelSpec("nomic-embed-text", "ollama", "Nomic Embed (local)", "embedding", 8192, 0, 0.0, 0.0,
               is_embedding=True, dimensions=768, tier="embedding",
               supports_tools=False, supports_streaming=False),
