@@ -78,3 +78,48 @@ class TestAlembicOwnedDatabase:
             _create_or_defer_to_alembic(connection)
         with sqlite.connect() as connection:
             assert inspect(connection).get_table_names() == ["alembic_version"]
+
+
+class TestStampedButIncomplete:
+    """`alembic stamp head` on a database built before a migration existed.
+
+    The stamp claims every migration ran, so `upgrade head` has nothing left to do and the
+    table it would have created never appears. Nothing else creates it either, and the
+    failure surfaces much later as a 500 on the first query -- which reads as a broken
+    feature rather than as a schema that was told it was finished.
+    """
+
+    def _stamp(self, engine, revision: str) -> None:
+        with engine.begin() as connection:
+            MigrationContext.configure(connection).stamp(ScriptDirectory(ALEMBIC_DIR), revision)
+
+    def test_a_table_missing_at_head_is_created(self, sqlite):
+        Base.metadata.create_all(sqlite)
+        with sqlite.begin() as connection:
+            connection.exec_driver_sql("DROP TABLE platform_settings")
+        self._stamp(sqlite, _head())
+
+        with sqlite.begin() as connection:
+            _create_or_defer_to_alembic(connection)
+
+        with sqlite.connect() as connection:
+            assert "platform_settings" in inspect(connection).get_table_names()
+            assert _revision_of(connection) == _head()
+
+    def test_a_complete_schema_at_head_is_left_alone(self, sqlite):
+        Base.metadata.create_all(sqlite)
+        self._stamp(sqlite, _head())
+        before = set(inspect(sqlite).get_table_names())
+
+        with sqlite.begin() as connection:
+            _create_or_defer_to_alembic(connection)
+
+        assert set(inspect(sqlite).get_table_names()) == before
+
+    def test_a_pending_migration_still_defers(self, sqlite):
+        """Below head the migrations will build it; creating it here breaks the upgrade."""
+        self._stamp(sqlite, "937904a33105")
+        with sqlite.begin() as connection:
+            _create_or_defer_to_alembic(connection)
+        with sqlite.connect() as connection:
+            assert inspect(connection).get_table_names() == ["alembic_version"]

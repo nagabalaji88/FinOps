@@ -175,10 +175,20 @@ function Registry({ data, onChanged }: { data: Catalogue; onChanged: () => void 
   const [results, setResults] = useState<Record<string, TestResult>>({})
   const [testing, setTesting] = useState<string | null>(null)
 
+  // A mutation with no error branch fails invisibly: the select snaps back on the next
+  // refetch and the page looks like it simply ignored the click, which is indistinguishable
+  // from a broken control. Whatever the server said belongs on screen.
+  const [saveError, setSaveError] = useState<string | null>(null)
   const select = useMutation({
     mutationFn: (body: { default_model?: string; guardrails_model?: string }) =>
       api.put('/models/selection', body),
-    onSuccess: onChanged,
+    onMutate: () => setSaveError(null),
+    onSuccess: () => {
+      setSaveError(null)
+      onChanged()
+    },
+    onError: (error: unknown) =>
+      setSaveError(error instanceof Error ? error.message : String(error)),
   })
 
   const test = async (id: string) => {
@@ -234,6 +244,11 @@ function Registry({ data, onChanged }: { data: Catalogue; onChanged: () => void 
             pending={select.isPending}
           />
         </div>
+        {saveError ? (
+          <p className="mt-3 rounded-md border border-state-err/30 bg-state-err/10 px-3 py-2 text-xs text-state-err">
+            Could not save: {saveError}
+          </p>
+        ) : null}
         {!data.selection.aligned ? (
           <p className="mt-3 text-xs text-state-warn">
             Guardrails run on {data.selection.effective_guardrails_model} while agents run on{' '}

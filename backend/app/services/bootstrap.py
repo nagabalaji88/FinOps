@@ -76,10 +76,34 @@ def _create_or_defer_to_alembic(connection: Any) -> None:
     """
     from alembic.migration import MigrationContext
     from alembic.script import ScriptDirectory
+    from sqlalchemy import inspect
 
     context = MigrationContext.configure(connection)
-    if context.get_current_revision() is not None:
-        log.debug("schema_managed_by_alembic", revision=context.get_current_revision())
+    current = context.get_current_revision()
+    if current is not None:
+        try:
+            script = ScriptDirectory(str(Path(__file__).resolve().parents[2] / "alembic"))
+            at_head = current == script.get_current_head()
+        except Exception:
+            at_head = False
+        if not at_head:
+            # Migrations are still pending; they will build what is missing. Creating it
+            # here would put tables ahead of the revision and break the next upgrade.
+            log.debug("schema_managed_by_alembic", revision=current)
+            return
+        # Alembic says head, so the schema should already match the models. When it does
+        # not, the history is claiming migrations that never ran -- which is what
+        # `alembic stamp head` does to a database built before the migration existed. There
+        # is no upgrade left to run, so nothing else will ever create the missing table and
+        # the app fails at runtime on a query instead of at startup. Create it and say so.
+        missing = set(Base.metadata.tables) - set(inspect(connection).get_table_names())
+        if missing:
+            log.warning(
+                "schema_at_head_but_incomplete",
+                missing=sorted(missing),
+                note="tables absent at head, most likely from an `alembic stamp head`; creating them",
+            )
+            Base.metadata.create_all(connection)
         return
 
     Base.metadata.create_all(connection)
