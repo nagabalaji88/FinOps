@@ -90,9 +90,12 @@ _register(
 
 # --- Google ------------------------------------------------------------------
 _register(
-    ModelSpec("gemini-2.5-pro", "google", "Gemini 2.5 Pro", "gemini", 1_048_576, 65_536,
+    # Google retired the 2.5 pair for new accounts and names these as the replacements in
+    # its own 404 body. Keeping the retired ids here only offers an operator a model their
+    # key cannot call, which is what the "Available models" tab exists to correct.
+    ModelSpec("gemini-3.1-pro-preview", "google", "Gemini 3.1 Pro", "gemini", 1_048_576, 65_536,
               1.25, 10.0, 0.31, supports_vision=True, tier="frontier"),
-    ModelSpec("gemini-2.5-flash", "google", "Gemini 2.5 Flash", "gemini", 1_048_576, 65_536,
+    ModelSpec("gemini-3.6-flash", "google", "Gemini 3.6 Flash", "gemini", 1_048_576, 65_536,
               0.30, 2.5, 0.075, supports_vision=True, tier="fast"),
     ModelSpec("text-embedding-004", "google", "Gemini Embedding 004", "embedding", 2048, 0,
               0.0, 0.0, is_embedding=True, dimensions=768, tier="embedding",
@@ -168,7 +171,7 @@ ALIASES: dict[str, str] = {
     "gpt-5": "gpt-5.5",
     "claude": "claude-sonnet-4-5",
     "claude-opus": "claude-opus-4-5",
-    "gemini": "gemini-2.5-pro",
+    "gemini": "gemini-3.1-pro-preview",
     "llama": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
     "mistral": "mistral-large-latest",
     "deepseek": "deepseek-chat",

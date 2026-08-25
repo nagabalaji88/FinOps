@@ -187,7 +187,7 @@ class GoogleProvider(LLMProvider):
                 f"Gemini model listing failed {resp.status_code}: {redact_provider_body(resp.text)}",
                 provider_status=resp.status_code,
             )
-        # Gemini returns "models/gemini-2.5-pro"; the bare id is what the catalogue uses.
+        # Gemini returns "models/gemini-3.1-pro-preview"; the bare id is what the catalogue uses.
         names = [str(m.get("name", "")) for m in resp.json().get("models") or []]
         return sorted({n.removeprefix("models/") for n in names if n})
 

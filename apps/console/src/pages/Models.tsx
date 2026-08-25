@@ -153,7 +153,7 @@ export default function Models() {
           )}
         </TabPanel>
         <TabPanel value="available">
-          <Available active={tab === 'available'} />
+          <Available active={tab === 'available'} onChanged={invalidate} />
         </TabPanel>
         <TabPanel value="keys">
           {keys.isLoading ? <SkeletonCard rows={5} /> : <Keys rows={keys.data ?? []} onChanged={invalidate} />}
@@ -167,6 +167,11 @@ export default function Models() {
 
 function Registry({ data, onChanged }: { data: Catalogue; onChanged: () => void }) {
   const [filter, setFilter] = useState('')
+  // A hand-maintained price list goes stale, and a row for a model the provider has
+  // already refused is worse than no row: it is an offer that cannot be accepted. Hidden
+  // by default, counted so it is not a silent disappearance, and recoverable because a
+  // refusal can be reversed by granting the entitlement.
+  const [showRefused, setShowRefused] = useState(false)
   const [results, setResults] = useState<Record<string, TestResult>>({})
   const [testing, setTesting] = useState<string | null>(null)
 
@@ -188,14 +193,20 @@ function Registry({ data, onChanged }: { data: Catalogue; onChanged: () => void 
     }
   }
 
+  const refusedCount = useMemo(
+    () => data.models.filter((m) => !m.is_embedding && m.rejected_by_provider).length,
+    [data.models],
+  )
+
   const models = useMemo(() => {
     const needle = filter.trim().toLowerCase()
-    const chat = data.models.filter((m) => !m.is_embedding)
+    let chat = data.models.filter((m) => !m.is_embedding)
+    if (!showRefused) chat = chat.filter((m) => !m.rejected_by_provider)
     if (!needle) return chat
     return chat.filter(
       (m) => m.id.toLowerCase().includes(needle) || m.display_name.toLowerCase().includes(needle),
     )
-  }, [data.models, filter])
+  }, [data.models, filter, showRefused])
 
   return (
     <div className="space-y-4">
@@ -237,12 +248,19 @@ function Registry({ data, onChanged }: { data: Catalogue; onChanged: () => void 
           title="Catalogue"
           subtitle="Priced models this platform knows how to call. Test one before selecting it."
           action={
-            <input
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-              placeholder={`Filter ${models.length} models...`}
-              className="input w-56 text-xs"
-            />
+            <div className="flex items-center gap-2">
+              {refusedCount ? (
+                <Button size="sm" variant="ghost" onClick={() => setShowRefused((v) => !v)}>
+                  {showRefused ? 'Hide' : 'Show'} {refusedCount} refused
+                </Button>
+              ) : null}
+              <input
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                placeholder={`Filter ${models.length} models...`}
+                className="input w-56 text-xs"
+              />
+            </div>
           }
         />
         <div className="overflow-x-auto">
@@ -384,7 +402,34 @@ function SelectionRow({
 
 /* ----------------------------------------------------------------- available */
 
-function Available({ active }: { active: boolean }) {
+function Available({ active, onChanged }: { active: boolean; onChanged: () => void }) {
+  const [results, setResults] = useState<Record<string, TestResult>>({})
+  const [busy, setBusy] = useState<string | null>(null)
+
+  const test = async (id: string, provider: string) => {
+    setBusy(id)
+    try {
+      const result = await api.post<TestResult>('/models/test', { model_id: id, provider })
+      setResults((previous) => ({ ...previous, [id]: result }))
+    } catch (error) {
+      setResults((previous) => ({ ...previous, [id]: { ok: false, error: String(error) } }))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const use = async (id: string) => {
+    setBusy(id)
+    try {
+      await api.put('/models/selection', { default_model: id })
+      onChanged()
+    } catch (error) {
+      setResults((previous) => ({ ...previous, [id]: { ok: false, error: String(error) } }))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['models', 'available'],
     queryFn: () => api.get<LiveModels>('/models/available'),
@@ -424,21 +469,48 @@ function Available({ active }: { active: boolean }) {
               {provider.error ? (
                 <p className="text-xs text-state-err">{provider.error}</p>
               ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {provider.models.map((model) => (
-                    <span
-                      key={model.id}
-                      className={cn(
-                        'rounded-md border px-2 py-1 font-mono text-2xs',
-                        model.in_catalogue
-                          ? 'border-state-ok/30 bg-state-ok/10 text-state-ok'
-                          : 'border-line/70 text-ink-subtle',
-                      )}
-                      title={model.in_catalogue ? 'priced in the catalogue' : 'not in the catalogue'}
-                    >
-                      {model.id}
-                    </span>
-                  ))}
+                <div className="space-y-1">
+                  {provider.models.map((model) => {
+                    const result = results[model.id]
+                    return (
+                      <div
+                        key={model.id}
+                        className="flex flex-wrap items-center gap-2 rounded-md border border-line/60 px-2 py-1.5"
+                      >
+                        <code className="font-mono text-2xs text-ink">{model.id}</code>
+                        {model.in_catalogue ? (
+                          <Badge tone="ok">priced</Badge>
+                        ) : (
+                          <Badge tone="idle">unpriced</Badge>
+                        )}
+                        {result ? (
+                          <span
+                            className={cn('text-2xs', result.ok ? 'text-state-ok' : 'text-state-err')}
+                          >
+                            {result.ok ? `replied in ${result.latency_ms}ms` : result.error}
+                          </span>
+                        ) : null}
+                        <div className="ml-auto flex gap-1.5">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            loading={busy === model.id}
+                            onClick={() => void test(model.id, provider.provider)}
+                          >
+                            Test
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy === model.id}
+                            onClick={() => void use(model.id)}
+                          >
+                            Use
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </div>

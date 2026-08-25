@@ -26,7 +26,7 @@ from app.core.logging import get_logger
 from app.core.rbac import Permission
 from app.core.redaction import client_safe_error
 from app.core.runtime_config import PROVIDER_ENV, runtime_config
-from app.llm.catalog import CATALOG, resolve_model
+from app.llm.catalog import CATALOG, compute_cost, resolve_model
 from app.llm.router import PROVIDER_KEY_ENV_VARS
 from app.llm.router import router as model_router
 from app.llm.types import Message
@@ -128,6 +128,20 @@ async def live_models(principal: PrincipalDep) -> dict[str, Any]:
     }
 
 
+async def _provider_lists(model_id: str) -> bool:
+    """True when some configured provider names this model in its own listing."""
+    for name in model_router.configured_providers():
+        provider = model_router.provider(name)
+        if provider is None:
+            continue
+        try:
+            if model_id in await provider.list_models():
+                return True
+        except Exception as exc:  # one unreachable provider must not veto the others
+            log.debug("listing_failed_during_validation", provider=name, error=str(exc))
+    return False
+
+
 class ModelSelection(BaseModel):
     default_model: str | None = Field(default=None, description="Model the agents use")
     guardrails_model: str | None = Field(
@@ -150,9 +164,24 @@ async def set_selection(
             continue
         # An empty string is a deliberate clear -- it hands the choice back to the router.
         if value and resolve_model(value) is None:
-            raise ValidationError(
-                f"'{value}' is not a catalogued model",
-                details={"field": field, "known_models": sorted(CATALOG)[:40]},
+            # The catalogue is a price list maintained by hand, so it goes stale: a provider
+            # retires a model, ships a replacement, and an operator whose key can call the
+            # replacement cannot select it. Ask the provider instead. Accepting a model it
+            # actually lists is a real check, not a bypass -- and it is the difference
+            # between the platform being usable this week and after the next catalogue edit.
+            if not await _provider_lists(value):
+                raise ValidationError(
+                    f"'{value}' is neither catalogued nor offered by any configured provider",
+                    details={
+                        "field": field,
+                        "hint": "Check the Available models tab for what these keys can call",
+                        "known_models": sorted(CATALOG)[:40],
+                    },
+                )
+            log.warning(
+                "uncatalogued_model_selected",
+                model=value,
+                note="reachable but unpriced; cost for this model will report as zero",
             )
         await runtime_config.set_model(session, field, value, actor=principal.email)
 
@@ -177,65 +206,77 @@ async def set_selection(
 
 class ModelTest(BaseModel):
     model_id: str = Field(min_length=1)
+    provider: str | None = Field(
+        default=None, description="Required only for a model the catalogue does not price"
+    )
 
 
 @router.post("/test")
 async def test_model(payload: ModelTest, principal: PrincipalDep) -> dict[str, Any]:
-    """Send one real completion, so "it works" is measured rather than assumed.
+    """Call this exact model once, with nothing between the request and the provider.
+
+    Deliberately not routed through ``chat()``. Routing exists to get *an* answer: it
+    substitutes when the requested model has no credential or has been retired, and refuses
+    outright while the provider's breaker is open. Both are right for serving traffic and
+    wrong here. The operator is asking whether this model works *right now*, and the only
+    honest answers are its own reply or its own error -- a different model's success, or a
+    breaker state left over from an earlier failure, answers a question nobody asked.
 
     The model travels in the body rather than the path. Ids legitimately contain slashes --
     ``meta-llama/Llama-3.3-70B-Instruct-Turbo`` -- so a path parameter needs the ``:path``
     converter, and that converter is greedy enough to swallow ``/keys/openai/test`` on its
-    way past. Keeping it out of the path removes the ambiguity rather than depending on the
-    order routes happen to be declared in.
+    way past.
     """
     principal.require(Permission.PLAYGROUND_USE)
     model_id = payload.model_id
     spec = resolve_model(model_id)
-    if spec is None:
-        raise NotFoundError(f"'{model_id}' is not a catalogued model")
+    provider_name = spec.provider if spec else payload.provider
+    if provider_name is None:
+        raise NotFoundError(f"'{model_id}' is not in the catalogue. Pass its provider to test it anyway.")
 
-    # `select()` deliberately falls through to another model when the requested one has no
-    # credential, which is right for serving traffic and wrong here: a test that quietly
-    # exercises a different model and reports success is worse than no test at all.
-    provider = model_router.provider(spec.provider)
-    if provider is None or not provider.configured:
+    provider = model_router.provider(provider_name)
+    if provider is None:
+        raise NotFoundError(f"'{provider_name}' is not a provider this platform calls")
+    if not provider.configured:
         return {
             "model": model_id,
+            "provider": provider_name,
             "ok": False,
-            "error": f"no credential for {spec.provider} - set {PROVIDER_KEY_ENV_VARS.get(spec.provider)}",
-            "provider": spec.provider,
+            "error": f"no credential for {provider_name} - set {PROVIDER_KEY_ENV_VARS.get(provider_name)}",
         }
 
     started = time.perf_counter()
     try:
-        response = await model_router.chat(
-            messages=[Message(role="user", content=PROBE)],
+        response = await provider.chat(
             model=model_id,
+            messages=[Message(role="user", content=PROBE)],
             max_tokens=16,
             temperature=0.0,
-            allow_fallback=False,  # testing a specific model means testing that model
-            context={"purpose": "model_test", "user_email": principal.email},
         )
     except Exception as exc:
-        log.warning("model_test_failed", model=model_id, error=str(exc))
+        log.warning("model_test_failed", model=model_id, provider=provider_name, error=str(exc))
         return {
             "model": model_id,
+            "provider": provider_name,
             "ok": False,
             "error": client_safe_error(str(exc)),
             "latency_ms": round((time.perf_counter() - started) * 1000, 1),
         }
+
+    # It answered, so whatever retired it earlier no longer holds -- an entitlement can be
+    # granted between two calls, and nothing else would ever clear the record.
+    model_router.restore(model_id)
+    cost = compute_cost(spec, response.usage.input_tokens, response.usage.output_tokens) if spec else 0.0
     return {
         "model": model_id,
-        # What actually answered. These differ when the router substitutes, and the whole
-        # point of a test is to show which model produced the result.
         "served_by": response.model,
-        "ok": True,
         "provider": response.provider,
+        "ok": True,
         "reply": response.content[:200],
         "latency_ms": round(response.latency_ms, 1),
         "tokens": {"input": response.usage.input_tokens, "output": response.usage.output_tokens},
-        "cost_usd": round(response.cost_usd, 6),
+        "cost_usd": round(cost, 6),
+        "priced": spec is not None,
         "truncated": response.truncated,
     }
 
