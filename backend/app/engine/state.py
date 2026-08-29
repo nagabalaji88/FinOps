@@ -114,6 +114,11 @@ class ExecutionState:
     def to_checkpoint(self) -> dict[str, Any]:
         return {
             "messages": [m.to_dict() for m in self.messages],
+            # The composed answer has to survive the pause. A final-approval interrupt shows
+            # the reviewer this text and then resumes straight into the response node, so
+            # losing it here means the reviewer approves one answer and the execution stores
+            # an empty one.
+            "final_response": self.final_response,
             "plan": self.plan,
             "reasoning_log": self.reasoning_log,
             "retrieved": self.retrieved,
@@ -166,6 +171,7 @@ class ExecutionState:
             )
             for m in checkpoint.get("messages", [])
         ]
+        self.final_response = checkpoint.get("final_response") or self.final_response
         self.plan = checkpoint.get("plan")
         self.reasoning_log = checkpoint.get("reasoning_log", [])
         self.retrieved = checkpoint.get("retrieved", [])

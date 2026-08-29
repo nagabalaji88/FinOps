@@ -153,6 +153,7 @@ async def cmd_validate(
     agent: str | None,
     scenario_ids: list[str] | None,
     tag: str | None,
+    band: str | None,
     output: str | None,
     fmt: str,
     concurrency: int,
@@ -183,6 +184,9 @@ async def cmd_validate(
         selected = [s for s in selected if s.id.upper() in wanted]
     if tag:
         selected = [s for s in selected if tag in s.tags]
+    if band:
+        wanted_bands = {b.strip().lower() for b in band.split(",")}
+        selected = [s for s in selected if s.band in wanted_bands]
     if not selected:
         print("No scenarios matched the filters.")
         return 2
@@ -417,6 +421,12 @@ def main() -> None:
         "--scenario", action="append", default=None, help="Run specific scenario ids (repeatable)"
     )
     validate.add_argument("--tag", default=None, help="Restrict to scenarios carrying a tag")
+    validate.add_argument(
+        "--band",
+        default=None,
+        help="Restrict to data bands: best, average, worst (comma-separated). "
+        "`--band best,average,worst` runs the twenty-four data-spread scenarios only",
+    )
     validate.add_argument("--output", default=None, help="Write the report to this path")
     validate.add_argument("--format", dest="fmt", default="markdown", choices=["markdown", "json"])
     validate.add_argument("--concurrency", type=int, default=1)
@@ -461,6 +471,7 @@ def main() -> None:
             args.agent,
             args.scenario,
             args.tag,
+            args.band,
             args.output,
             args.fmt,
             args.concurrency,

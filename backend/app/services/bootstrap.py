@@ -744,6 +744,62 @@ async def seed_sample_banking(
             )
         )
 
+    # A second and third portfolio, because one mandate cannot show a breach. The
+    # concentrated book violates its own max_single_stock_pct, which is what makes the
+    # research agent's mandate check answer something other than "compliant".
+    concentrated = Portfolio(
+        portfolio_code="PF-CONCENTRATED-01",
+        customer_id=created_customers[3].id,
+        name="Technology Conviction Mandate",
+        strategy="growth",
+        base_currency="INR",
+        cash_balance=95_000.0,
+        benchmark="NIFTY50",
+        risk_profile="aggressive",
+        mandate={"max_single_stock_pct": 15, "min_cash_pct": 5, "excluded_sectors": ["Tobacco"]},
+    )
+    income = Portfolio(
+        portfolio_code="PF-INCOME-01",
+        customer_id=created_customers[9].id,
+        name="Conservative Income Mandate",
+        strategy="income",
+        base_currency="INR",
+        cash_balance=1_250_000.0,
+        benchmark="CRISIL Composite Bond",
+        risk_profile="conservative",
+        mandate={"max_single_stock_pct": 10, "min_cash_pct": 15, "excluded_sectors": ["Tobacco", "Defence"]},
+    )
+    session.add_all([concentrated, income])
+    await session.flush()
+    # Two positions carrying most of the book: a concentration breach that is arithmetic
+    # rather than opinion, so the agent either finds it or is demonstrably wrong.
+    for symbol, _, sector, _, price in instruments[:2]:
+        session.add(
+            Holding(
+                portfolio_id=concentrated.id,
+                symbol=symbol,
+                quantity=4_000,
+                average_cost=round(price * 0.82, 2),
+                currency="INR",
+                asset_class="equity",
+                sector=sector,
+                opened_on=date.today() - timedelta(days=rng.randint(90, 500)),
+            )
+        )
+    for symbol, _, sector, _, price in instruments[2:6]:
+        session.add(
+            Holding(
+                portfolio_id=income.id,
+                symbol=symbol,
+                quantity=round(rng.uniform(40, 160), 0),
+                average_cost=round(price * rng.uniform(0.85, 1.05), 2),
+                currency="INR",
+                asset_class="equity",
+                sector=sector,
+                opened_on=date.today() - timedelta(days=rng.randint(200, 900)),
+            )
+        )
+
     session.add(
         KycCase(
             case_number="KYC-2026-0001",
@@ -762,6 +818,46 @@ async def seed_sample_banking(
             status="in_progress",
         )
     )
+    # Two more cases so due diligence has something to decide other than "clean". The names
+    # are taken from the watchlist the screening tool actually queries, so the hits are real
+    # matches rather than a flag set by hand -- an agent that misses them is wrong, and one
+    # that finds them did the work.
+    session.add(
+        KycCase(
+            case_number="KYC-2026-0002",
+            applicant_name="Suresh Nathan Iyer",  # PEP, domestic tier 2
+            applicant_email="suresh.iyer@example.in",
+            applicant_phone="+91 98200 41122",
+            date_of_birth=date(1972, 4, 18),
+            nationality="IN",
+            declared_address={
+                "line1": "14 Carmichael Road",
+                "city": "Mumbai",
+                "state": "Maharashtra",
+                "postcode": "400026",
+                "country": "India",
+            },
+            status="in_progress",
+        )
+    )
+    session.add(
+        KycCase(
+            case_number="KYC-2026-0003",
+            applicant_name="Farhan Abdul Rahman",  # internal watchlist, jurisdiction risk
+            applicant_email="f.rahman@example.com",
+            applicant_phone="+98 21 8899 4410",
+            date_of_birth=date(1985, 11, 3),
+            nationality="IR",
+            declared_address={
+                "line1": "Plot 7, Valiasr Street",
+                "city": "Tehran",
+                "state": "Tehran",
+                "postcode": "1966733111",
+                "country": "Iran",
+            },
+            status="in_progress",
+        )
+    )
 
     await session.commit()
     return {
@@ -771,8 +867,8 @@ async def seed_sample_banking(
         "faqs": len(faqs),
         "instruments": len(instruments),
         "price_bars": bars,
-        "portfolios": 1,
-        "kyc_cases": 1,
+        "portfolios": 3,
+        "kyc_cases": 3,
         **credit_seeded,
         **collections_seeded,
         **payments_seeded,

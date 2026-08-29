@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.core.errors import NotFoundError, ValidationError
 from app.core.storage import store
@@ -34,8 +34,35 @@ STRUCTURING_THRESHOLD = 1_000_000.0  # INR reporting threshold
 STRUCTURING_BAND = 0.9
 
 
+async def _resolve_customer_id(ctx: ToolContext, identifier: str) -> str:
+    """Accept whatever identifier the caller actually holds and return the internal id.
+
+    Investigators and agents work from customer *numbers* (CUS-100004) -- that is what every
+    other tool prints. Matching only on the internal id meant a customer number scanned an
+    empty ledger and reported "no suspicious activity", which is the most dangerous possible
+    way for this tool to be wrong.
+    """
+    ident = identifier.strip()
+    customer = (
+        await ctx.session.execute(
+            select(Customer).where(
+                or_(
+                    Customer.id == ident,
+                    Customer.customer_number == ident,
+                    func.lower(Customer.email) == ident.lower(),
+                )
+            )
+        )
+    ).scalar_one_or_none()
+    if customer is None:
+        raise NotFoundError(f"Customer '{identifier}' not found")
+    return customer.id
+
+
 class MonitorArgs(BaseModel):
-    customer_id: str | None = Field(default=None, description="Restrict to one customer")
+    customer_id: str | None = Field(
+        default=None, description="Restrict to one customer: customer number, email or id"
+    )
     days: int = Field(default=90, ge=1, le=730)
     min_amount: float = Field(default=0.0)
     persist_alerts: bool = Field(default=True)
@@ -53,7 +80,7 @@ async def monitor_transactions(args: MonitorArgs, ctx: ToolContext) -> dict[str,
     since = datetime.now(UTC) - timedelta(days=args.days)
     stmt = select(Transaction).where(Transaction.booked_at >= since)
     if args.customer_id:
-        stmt = stmt.where(Transaction.customer_id == args.customer_id)
+        stmt = stmt.where(Transaction.customer_id == await _resolve_customer_id(ctx, args.customer_id))
     if args.min_amount:
         stmt = stmt.where(func.abs(Transaction.amount) >= args.min_amount)
     txns = (await ctx.session.execute(stmt.order_by(Transaction.booked_at))).scalars().all()
@@ -295,7 +322,7 @@ def _alert(
 
 
 class ProfileArgs(BaseModel):
-    customer_id: str
+    customer_id: str = Field(description="Customer number, email or id")
     days: int = Field(default=365, ge=30, le=1095)
 
 
@@ -308,10 +335,10 @@ class ProfileArgs(BaseModel):
 )
 async def profile_customer(args: ProfileArgs, ctx: ToolContext) -> dict[str, Any]:
     customer = (
-        await ctx.session.execute(select(Customer).where(Customer.id == args.customer_id))
-    ).scalar_one_or_none()
-    if customer is None:
-        raise NotFoundError(f"Customer '{args.customer_id}' not found")
+        await ctx.session.execute(
+            select(Customer).where(Customer.id == await _resolve_customer_id(ctx, args.customer_id))
+        )
+    ).scalar_one()
     since = datetime.now(UTC) - timedelta(days=args.days)
     txns = (
         (
@@ -390,7 +417,7 @@ async def profile_customer(args: ProfileArgs, ctx: ToolContext) -> dict[str, Any
 
 
 class TimelineArgs(BaseModel):
-    customer_id: str
+    customer_id: str = Field(description="Customer number, email or id")
     days: int = Field(default=180, ge=7, le=730)
     include_alerts: bool = True
 
@@ -403,12 +430,13 @@ class TimelineArgs(BaseModel):
     timeout_seconds=60,
 )
 async def build_case_timeline(args: TimelineArgs, ctx: ToolContext) -> dict[str, Any]:
+    customer_id = await _resolve_customer_id(ctx, args.customer_id)
     since = datetime.now(UTC) - timedelta(days=args.days)
     txns = (
         (
             await ctx.session.execute(
                 select(Transaction)
-                .where(Transaction.customer_id == args.customer_id, Transaction.booked_at >= since)
+                .where(Transaction.customer_id == customer_id, Transaction.booked_at >= since)
                 .order_by(Transaction.booked_at)
             )
         )
@@ -434,7 +462,7 @@ async def build_case_timeline(args: TimelineArgs, ctx: ToolContext) -> dict[str,
             (
                 await ctx.session.execute(
                     select(AmlAlert)
-                    .where(AmlAlert.customer_id == args.customer_id, AmlAlert.detected_at >= since)
+                    .where(AmlAlert.customer_id == customer_id, AmlAlert.detected_at >= since)
                     .order_by(AmlAlert.detected_at)
                 )
             )
@@ -454,7 +482,7 @@ async def build_case_timeline(args: TimelineArgs, ctx: ToolContext) -> dict[str,
         )
     events.sort(key=lambda e: e["at"])
     return {
-        "customer_id": args.customer_id,
+        "customer_id": customer_id,
         "window_days": args.days,
         "event_count": len(events),
         "timeline": events[:300],
@@ -462,7 +490,7 @@ async def build_case_timeline(args: TimelineArgs, ctx: ToolContext) -> dict[str,
 
 
 class CaseArgs(BaseModel):
-    customer_id: str
+    customer_id: str = Field(description="Customer number, email or id")
     title: str
     alert_numbers: list[str] = Field(default_factory=list)
     priority: str = Field(default="medium")
@@ -488,7 +516,7 @@ async def create_investigation_case(args: CaseArgs, ctx: ToolContext) -> dict[st
     risk_score = max((a.score for a in alerts), default=0.0)
     case = AmlCase(
         case_number=f"AML-{datetime.now(UTC):%Y%m%d}-{uuid.uuid4().hex[:6].upper()}",
-        customer_id=args.customer_id,
+        customer_id=await _resolve_customer_id(ctx, args.customer_id),
         title=args.title[:300],
         priority=args.priority,
         risk_score=risk_score,

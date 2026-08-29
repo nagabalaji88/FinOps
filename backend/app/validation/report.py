@@ -154,11 +154,16 @@ def format_live(
     """Readable block printed as each scenario finishes, so a run is watchable."""
     scenario = result.scenario
     observed = result.observed
-    head = f"[{index:>2}/{total}] {scenario.id:<7} {scenario.agent_key:<21} {scenario.title}"
+    band = f"[{scenario.band}] " if scenario.band else ""
+    head = f"[{index:>2}/{total}] {scenario.id:<10} {scenario.agent_key:<21} {band}{scenario.title}"
     lines = ["", head, "-" * min(len(head), width)]
 
     payload = json.dumps(scenario.payload, default=str)
     lines += _field("input", payload if len(payload) <= 400 else payload[:397] + "...", width)
+    if scenario.data_basis:
+        # The record, not the wording, is what a band scenario is asserting about. Printing it
+        # next to the result means a failure can be read without opening the seed.
+        lines += _field("data", scenario.data_basis, width)
 
     facts = [VERDICT_MARK[result.verdict], f"{result.duration_ms / 1000:.1f}s"]
     if observed:

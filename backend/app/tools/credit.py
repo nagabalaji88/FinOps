@@ -389,6 +389,74 @@ async def pull_credit_bureau(args: BureauArgs, ctx: ToolContext) -> dict[str, An
     }
 
 
+async def _verified_monthly_income(ctx: ToolContext, customer: Customer) -> tuple[float | None, dict[str, Any]]:
+    """Monthly income evidenced by salary credits, and how it was established.
+
+    Returns `None` when the ledger cannot evidence an income, so the caller can decide
+    whether to fall back to the declared figure or treat the income as unknown.
+    """
+    since = datetime.now(UTC) - timedelta(days=180)
+    account_ids = (
+        (await ctx.session.execute(select(Account.id).where(Account.customer_id == customer.id)))
+        .scalars()
+        .all()
+    )
+    if not account_ids:
+        return None, {"method": "declared", "reason": "no accounts held with the bank"}
+
+    credits = (
+        (
+            await ctx.session.execute(
+                select(Transaction).where(
+                    Transaction.account_id.in_(account_ids),
+                    Transaction.booked_at >= since,
+                    Transaction.direction == "credit",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    salary = [
+        t
+        for t in credits
+        if (t.category or "").lower() in {"salary", "income"} or "salary" in (t.description or "").lower()
+    ]
+    if not salary:
+        return None, {"method": "declared", "reason": "no salary credits identified"}
+
+    months = max(1, len({(t.booked_at.year, t.booked_at.month) for t in salary}))
+    return round(sum(abs(t.amount) for t in salary) / months, 2), {
+        "method": "salary_credits",
+        "credits_found": len(salary),
+        "months_observed": months,
+        "window_days": 180,
+    }
+
+
+async def _existing_monthly_obligations(ctx: ToolContext, customer: Customer) -> float:
+    """Committed monthly outgo: instalments on live loans plus card minimum dues."""
+    loans = (
+        (
+            await ctx.session.execute(
+                select(Loan).where(Loan.customer_id == customer.id, Loan.status == "active")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    cards = (
+        (
+            await ctx.session.execute(
+                select(Card).where(Card.customer_id == customer.id, Card.status == "active")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return round(sum(loan.emi_amount for loan in loans) + sum(card.minimum_due for card in cards), 2)
+
+
 class AffordabilityArgs(BaseModel):
     application: str = Field(description="Application number or id")
     proposed_rate_pct: float = Field(
@@ -413,78 +481,18 @@ async def assess_affordability(args: AffordabilityArgs, ctx: ToolContext) -> dic
     application = await _application(ctx, args.application)
     customer = await _customer(ctx, application.customer_id)
 
-    verified_income: float | None = None
-    evidence: dict[str, Any] = {"method": "declared"}
-    if args.verify_income_from_ledger:
-        since = datetime.now(UTC) - timedelta(days=180)
-        account_ids = [
-            row
-            for row in (
-                await ctx.session.execute(select(Account.id).where(Account.customer_id == customer.id))
-            )
-            .scalars()
-            .all()
-        ]
-        if account_ids:
-            credits = (
-                (
-                    await ctx.session.execute(
-                        select(Transaction).where(
-                            Transaction.account_id.in_(account_ids),
-                            Transaction.booked_at >= since,
-                            Transaction.direction == "credit",
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            salary = [
-                t
-                for t in credits
-                if (t.category or "").lower() in {"salary", "income"}
-                or "salary" in (t.description or "").lower()
-            ]
-            if salary:
-                months = max(1, len({(t.booked_at.year, t.booked_at.month) for t in salary}))
-                verified_income = round(sum(abs(t.amount) for t in salary) / months, 2)
-                evidence = {
-                    "method": "salary_credits",
-                    "credits_found": len(salary),
-                    "months_observed": months,
-                    "window_days": 180,
-                }
-            else:
-                evidence = {"method": "declared", "reason": "no salary credits identified"}
-        else:
-            evidence = {"method": "declared", "reason": "no accounts held with the bank"}
+    verified_income, evidence = (
+        await _verified_monthly_income(ctx, customer)
+        if args.verify_income_from_ledger
+        else (None, {"method": "declared"})
+    )
 
     declared = application.declared_monthly_income
     income = verified_income if verified_income is not None else declared
     if income <= 0:
         raise ValidationError("No income available: neither declared nor verifiable")
 
-    loans = (
-        (
-            await ctx.session.execute(
-                select(Loan).where(Loan.customer_id == customer.id, Loan.status == "active")
-            )
-        )
-        .scalars()
-        .all()
-    )
-    cards = (
-        (
-            await ctx.session.execute(
-                select(Card).where(Card.customer_id == customer.id, Card.status == "active")
-            )
-        )
-        .scalars()
-        .all()
-    )
-    existing_obligations = round(
-        sum(loan.emi_amount for loan in loans) + sum(card.minimum_due for card in cards), 2
-    )
+    existing_obligations = await _existing_monthly_obligations(ctx, customer)
 
     rate = args.proposed_rate_pct or _indicative_rate(application.product)
     proposed_emi = emi(application.requested_amount, rate, application.tenure_months)
@@ -818,12 +826,35 @@ async def check_credit_policy(args: PolicyArgs, ctx: ToolContext) -> dict[str, A
     else:
         record("minimum_bureau_score", False, "no bureau record on file; a current pull is required")
 
-    if args.foir_pct is not None:
+    # Same principle as the bureau score above: compute the ratio rather than knock the
+    # application out because an optional argument was left off. An omitted argument is not
+    # evidence of unaffordability, and treating it as one declined every application whose
+    # caller happened to skip `assess_affordability` first.
+    foir = args.foir_pct
+    basis = "supplied by the caller"
+    if foir is None:
+        income, _ = await _verified_monthly_income(ctx, customer)
+        if income is None:
+            income = application.declared_monthly_income
+            basis = "computed from declared income at the indicative product rate"
+        else:
+            basis = "computed from salary credits at the indicative product rate"
+        if income > 0:
+            obligations = await _existing_monthly_obligations(ctx, customer)
+            proposed = emi(
+                application.requested_amount,
+                _indicative_rate(application.product),
+                application.tenure_months,
+            )
+            foir = (obligations + proposed) / income * 100
+    if foir is not None:
         record(
-            "maximum_foir", args.foir_pct <= MAX_FOIR_PCT, f"FOIR {args.foir_pct:.2f}%, cap {MAX_FOIR_PCT}%"
+            "maximum_foir",
+            foir <= MAX_FOIR_PCT,
+            f"FOIR {foir:.2f}%, cap {MAX_FOIR_PCT}% ({basis})",
         )
     else:
-        record("maximum_foir", False, "no FOIR supplied")
+        record("maximum_foir", False, "no income declared or evidenced, so FOIR cannot be established")
 
     loans = (
         await ctx.session.execute(
