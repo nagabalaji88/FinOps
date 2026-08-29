@@ -1,0 +1,144 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-api
+  namespace: finops
+  labels: { app: finops-api, component: api }
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels: { app: finops-api }
+  template:
+    metadata:
+      labels: { app: finops-api, component: api }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: finops-api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: finops-api }
+      initContainers:
+        - name: migrate
+          image: ghcr.io/finops/agent-api:1.0.0
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef: { name: finops-config }
+            - secretRef: { name: finops-secrets }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      containers:
+        - name: api
+          image: ghcr.io/finops/agent-api:1.0.0
+          imagePullPolicy: IfNotPresent
+          args: ["--workers", "4", "--proxy-headers", "--forwarded-allow-ips", "*"]
+          ports:
+            - { name: http, containerPort: 8000 }
+          envFrom:
+            - configMapRef: { name: finops-config }
+            - secretRef: { name: finops-secrets }
+          env:
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - name: OTEL_SERVICE_NAME
+              value: finops-api
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { cpu: "2", memory: 3Gi }
+          startupProbe:
+            httpGet: { path: /health/startup, port: http }
+            failureThreshold: 30
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health/live, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 4
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop: { exec: { command: ["sleep", "10"] } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: artifacts, mountPath: /srv/var/artifacts }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: artifacts
+          emptyDir: {}
+      terminationGracePeriodSeconds: 45
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: finops-api
+  namespace: finops
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: finops-api
+  namespace: finops
+  labels: { app: finops-api }
+spec:
+  selector: { app: finops-api }
+  ports:
+    - { name: http, port: 8000, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: finops-api
+  namespace: finops
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app: finops-api }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: finops-api
+  namespace: finops
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: finops-api }
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
+    - type: Resource
+      resource: { name: memory, target: { type: Utilization, averageUtilization: 75 } }
+    - type: Pods
+      pods:
+        metric: { name: finops_queue_depth }
+        target: { type: AverageValue, averageValue: "10" }
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies: [{ type: Percent, value: 25, periodSeconds: 60 }]
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies: [{ type: Percent, value: 100, periodSeconds: 30 }]

@@ -1,0 +1,30 @@
+# NeMo Guardrails — Customer Service Agent
+#
+# The agent authenticates a customer and answers on that customer's own accounts, cards
+# and loans. These rails keep it inside that mandate.
+#
+# Deterministic rails run with no credentials. The `self check` rails need a model; the
+# loader removes them when no provider is configured rather than letting a rail fail open.
+
+instructions:
+  - type: general
+    content: |
+      You are the customer service assistant of a regulated retail bank.
+      You answer only about the authenticated customer's own products and the bank's
+      published policies. You never give investment, tax or legal advice, never reveal
+      another customer's data, and never disclose a full account, card or identity number.
+
+rails:
+  input:
+    flows:
+      - banking prompt integrity
+      - customer service scope
+      - self check input
+  output:
+    flows:
+      - sensitive disclosure
+      - self check output
+
+enable_rails_exceptions: true
+
+lowest_temperature: 0.0

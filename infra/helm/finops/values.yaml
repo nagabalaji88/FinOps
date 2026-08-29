@@ -1,0 +1,157 @@
+# Default values for the FinOps AI Command Center.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  api:
+    repository: ghcr.io/finops/agent-api
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+api:
+  replicaCount: 3
+  workers: 4
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: "2", memory: 3Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 75
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+# Two front-end applications over the same API. Each is its own image, Deployment,
+# Service and host; disable either without touching the other.
+web:
+  execute:
+    enabled: true
+    host: execute.finops.example.com
+    replicaCount: 2
+    image:
+      repository: ghcr.io/finops/agent-execute
+      tag: "1.0.0"
+      pullPolicy: IfNotPresent
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 300m, memory: 256Mi }
+  console:
+    enabled: true
+    host: console.finops.example.com
+    replicaCount: 2
+    image:
+      repository: ghcr.io/finops/agent-console
+      tag: "1.0.0"
+      pullPolicy: IfNotPresent
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 300m, memory: 256Mi }
+
+worker:
+  enabled: true
+  replicaCount: 2
+  concurrency: 4
+  resources:
+    requests: { cpu: 300m, memory: 768Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
+beat:
+  enabled: true
+
+migration:
+  enabled: true
+  seedPlatform: true
+  # Loads the sample banking environment; leave false for production.
+  seedSampleBanking: false
+
+ingress:
+  enabled: true
+  className: nginx
+  # Hosts come from web.<app>.host above; one certificate covers both.
+  tls:
+    enabled: true
+    secretName: finops-tls
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+
+config:
+  environment: production
+  logLevel: INFO
+  defaultModel: claude-haiku-4-5
+  defaultEmbeddingModel: text-embedding-3-small
+  dailyCostBudgetUsd: "500"
+  monthlyCostBudgetUsd: "10000"
+  perExecutionCostCapUsd: "5"
+  maxConcurrentExecutions: "32"
+  executionTimeoutSeconds: "900"
+  dataRetentionDays: "400"
+  rateLimitPerMinute: "240"
+  corsOrigins: https://execute.finops.example.com,https://console.finops.example.com
+  otelEndpoint: http://otel-collector.observability:4318
+  qdrantUrl: http://finops-qdrant:6333
+  kafkaBootstrapServers: ""
+  elasticsearchUrl: ""
+  neo4jUri: ""
+  minioEndpoint: finops-minio:9000
+  keycloakUrl: ""
+  keycloakRealm: finops
+  vaultAddr: ""
+
+# Prefer externalSecrets in production; `secrets` is for local clusters only.
+externalSecrets:
+  enabled: true
+  storeName: vault-backend
+  storeKind: ClusterSecretStore
+  refreshInterval: 15m
+  vaultPathPrefix: finops
+
+secrets:
+  create: false
+  data: {}
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  labels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile: { type: RuntimeDefault }
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: ["ALL"] }
+
+networkPolicy:
+  enabled: true
+
+postgresql:
+  enabled: true
+  auth:
+    username: finops
+    database: finops
+    existingSecret: finops-postgresql
+  primary:
+    persistence: { size: 100Gi }
+    resources:
+      requests: { cpu: "1", memory: 2Gi }
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth: { enabled: false }
+  master:
+    persistence: { size: 8Gi }
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

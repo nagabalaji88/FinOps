@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: finops-config
+  namespace: finops
+data:
+  ENVIRONMENT: production
+  LOG_LEVEL: INFO
+  LOG_JSON: "true"
+  API_PREFIX: /api/v1
+  DEFAULT_MODEL: claude-haiku-4-5
+  DEFAULT_EMBEDDING_MODEL: text-embedding-3-small
+  REDIS_URL: redis://finops-redis:6379/0
+  KAFKA_BOOTSTRAP_SERVERS: finops-kafka:9092
+  QDRANT_URL: http://finops-qdrant:6333
+  MINIO_ENDPOINT: finops-minio:9000
+  ELASTICSEARCH_URL: http://finops-elasticsearch:9200
+  NEO4J_URI: bolt://finops-neo4j:7687
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability:4318
+  CELERY_BROKER_URL: redis://finops-redis:6379/1
+  CELERY_RESULT_BACKEND: redis://finops-redis:6379/2
+  DAILY_COST_BUDGET_USD: "500"
+  MONTHLY_COST_BUDGET_USD: "10000"
+  PER_EXECUTION_COST_CAP_USD: "5"
+  MAX_CONCURRENT_EXECUTIONS: "32"
+  EXECUTION_TIMEOUT_SECONDS: "900"
+  DATA_RETENTION_DAYS: "400"
+  # Comma-separated. Both applications call this API, so both origins must be listed.
+  CORS_ORIGINS: https://execute.finops.example.com,https://console.finops.example.com
+---
+# Secrets are supplied by the External Secrets Operator from Vault.
+# The manifest below documents the required keys; never commit real values.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: finops-secrets
+  namespace: finops
+spec:
+  refreshInterval: 15m
+  secretStoreRef: { name: vault-backend, kind: ClusterSecretStore }
+  target:
+    name: finops-secrets
+    creationPolicy: Owner
+  data:
+    - { secretKey: DATABASE_URL, remoteRef: { key: finops/database, property: url } }
+    - { secretKey: JWT_SECRET, remoteRef: { key: finops/auth, property: jwt_secret } }
+    - { secretKey: BOOTSTRAP_ADMIN_PASSWORD, remoteRef: { key: finops/auth, property: bootstrap_password } }
+    - { secretKey: OPENAI_API_KEY, remoteRef: { key: finops/providers, property: openai } }
+    - { secretKey: ANTHROPIC_API_KEY, remoteRef: { key: finops/providers, property: anthropic } }
+    - { secretKey: GOOGLE_API_KEY, remoteRef: { key: finops/providers, property: google } }
+    - { secretKey: AZURE_OPENAI_API_KEY, remoteRef: { key: finops/providers, property: azure_openai } }
+    - { secretKey: AZURE_OPENAI_ENDPOINT, remoteRef: { key: finops/providers, property: azure_endpoint } }
+    - { secretKey: AWS_ACCESS_KEY_ID, remoteRef: { key: finops/providers, property: aws_key_id } }
+    - { secretKey: AWS_SECRET_ACCESS_KEY, remoteRef: { key: finops/providers, property: aws_secret } }
+    - { secretKey: KEYCLOAK_CLIENT_SECRET, remoteRef: { key: finops/sso, property: client_secret } }
+    - { secretKey: VAULT_TOKEN, remoteRef: { key: finops/vault, property: token } }
+    - { secretKey: MINIO_ACCESS_KEY, remoteRef: { key: finops/storage, property: access_key } }
+    - { secretKey: MINIO_SECRET_KEY, remoteRef: { key: finops/storage, property: secret_key } }

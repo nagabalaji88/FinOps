@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.db
+*.db-wal
+*.db-shm
+var/
+
+# Node
+node_modules/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Release bundles (produced by scripts/package.sh)
+release/*
+!release/*.zip
+!release/*.sha256
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

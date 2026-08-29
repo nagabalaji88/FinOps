@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(python --version)",
+      "PowerShell(py -3 --version)",
+      "PowerShell(py --list)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\pip.exe install -e \".[dev]\" 2>&1)",
+      "PowerShell(tail -30)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\alembic.exe upgrade head)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m app.cli init-db)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m app.cli seed-banking --customers 24)",
+      "Bash(.venv/Scripts/python.exe -c \"import os; from dotenv import load_dotenv; load_dotenv\\('../.env'\\); print\\('OPENAI_API_KEY:', os.getenv\\('OPENAI_API_KEY'\\)[:20] + '...' if os.getenv\\('OPENAI_API_KEY'\\) else 'NOT SET'\\)\")",
+      "PowerShell(ollama --version)",
+      "Read(//home/user/FinOps/**)",
+      "Bash(cd /home/user/FinOps && grep -n \"env\" .gitignore; echo \"--- existing .env?\"; ls -la .env 2>/dev/null || echo \"none\")",
+      "Read(//home/user/**)",
+      "PowerShell(py -0p 2>&1 | Select-Object -First 10; Write-Output \"---\"; \\(Get-Command python\\).Source)",
+      "Bash(py -3.11 -)",
+      "Bash(git check-ignore *)",
+      "PowerShell(py -0p 2>$null)",
+      "PowerShell(cd D:\\\\AI_Gen\\\\Finals\\\\FinOps\\\\backend; .\\\\.venv\\\\Scripts\\\\python.exe -m pip install -e \".[dev,guardrails]\" > install.log 2>&1; Write-Output \"EXIT=$LASTEXITCODE\"; Get-Content install.log -Tail 25)",
+      "PowerShell(cd D:\\\\AI_Gen\\\\Finals\\\\FinOps\\\\backend; .\\\\.venv\\\\Scripts\\\\python.exe -m pip install -e \".[dev]\" > install314.log 2>&1; Write-Output \"EXIT=$LASTEXITCODE\"; Get-Content install314.log -Tail 6)",
+      "PowerShell(cd D:\\\\AI_Gen\\\\Finals\\\\FinOps\\\\backend; .\\\\.venv\\\\Scripts\\\\python.exe -m pip install --dry-run -e . > dry314.log 2>&1; Write-Output \"BASE_EXIT=$LASTEXITCODE\"; Get-Content dry314.log -Tail 4; Write-Output \"=== dev tools ===\"; .\\\\.venv\\\\Scripts\\\\python.exe -m pip install --dry-run pytest pytest-asyncio pytest-cov ruff mypy types-python-dateutil > drytools.log 2>&1; Write-Output \"TOOLS_EXIT=$LASTEXITCODE\"; Get-Content drytools.log -Tail 3)",
+      "PowerShell(cd D:\\\\AI_Gen\\\\Finals\\\\FinOps\\\\backend; .\\\\.venv\\\\Scripts\\\\python.exe -m pip install --upgrade pip --quiet; .\\\\.venv\\\\Scripts\\\\python.exe -m pip install -e \".[dev,guardrails]\" > install311.log 2>&1; Write-Output \"EXIT=$LASTEXITCODE\"; Get-Content install311.log -Tail 8)",
+      "PowerShell(cd D:\\\\AI_Gen\\\\Finals\\\\FinOps\\\\backend; Start-Process -FilePath \".\\\\.venv\\\\Scripts\\\\python.exe\" -ArgumentList \"-m\",\"uvicorn\",\"app.main:app\",\"--port\",\"8000\" -WindowStyle Hidden; Start-Sleep -Seconds 12; try { $r = Invoke-RestMethod http://localhost:8000/health/ready; $r | ConvertTo-Json -Depth 3 | Select-Object -First 30 } catch { Write-Output \"not ready: $_\" })",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Read(//home/user/FinOps/backend/**)",
+      "Bash(cd d:/AI_Gen/Finals/FinOps/backend && sed -n '1,40p' pyproject.toml && echo \"===== RUFF/MYPY =====\" && sed -n '/\\\\[tool.ruff\\\\]/,/^$/p;/\\\\[tool.mypy\\\\]/,/^$/p' pyproject.toml)",
+      "PowerShell(Set-Location \"d:\\\\AI_Gen\\\\Finals\\\\FinOps\\\\backend\"; & \".venv\\\\Scripts\\\\python.exe\" \"scripts\\\\doctor.py\"; Write-Output \"exit=$LASTEXITCODE\")",
+      "Bash(node -e \"for \\(const p of ['d3-geo','topojson-client','world-atlas']\\) console.log\\(p, require\\('./node_modules/'+p+'/package.json'\\).version\\)\")",
+      "Bash(node -e \"const w=require\\('./node_modules/world-atlas/countries-110m.json'\\); console.log\\('objects:', Object.keys\\(w.objects\\)\\); console.log\\('countries:', w.objects.countries.geometries.length\\); console.log\\('sample props:', JSON.stringify\\(w.objects.countries.geometries[0].properties\\)\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(npm audit *)",
+      "Bash(git diff *)",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)"
+    ]
+  }
+}
