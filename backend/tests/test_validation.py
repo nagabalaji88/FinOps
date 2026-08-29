@@ -35,7 +35,11 @@ from tests.conftest import TEST_MODEL
 #: Read from the registry, not frozen here: implementing an agent without adding its
 #: scenarios must fail this suite rather than quietly shrink the coverage.
 IMPLEMENTED = {spec.key for spec in AGENT_SPECS}
-SCENARIOS_PER_AGENT = 4
+#: Four behavioural scenarios, chosen for the control they exercise, plus one input for
+#: each data band, chosen for the record it reads.
+BEHAVIOURAL_PER_AGENT = 4
+BANDS = ("best", "average", "worst")
+SCENARIOS_PER_AGENT = BEHAVIOURAL_PER_AGENT + len(BANDS)
 
 
 class TestScenarioCatalogue:
@@ -52,6 +56,18 @@ class TestScenarioCatalogue:
             assert len(for_agent(key)) == SCENARIOS_PER_AGENT, (
                 f"{key} should have {SCENARIOS_PER_AGENT} scenarios"
             )
+
+    def test_every_agent_has_a_best_average_and_worst_input(self):
+        """An agent proven only on its cleanest record is not proven."""
+        for key in IMPLEMENTED:
+            bands = sorted(s.band for s in for_agent(key) if s.band)
+            assert bands == sorted(BANDS), f"{key} covers bands {bands}, expected {sorted(BANDS)}"
+
+    def test_band_scenarios_record_the_data_they_rest_on(self):
+        """A band assertion is about a record, so the record has to be written down."""
+        for scenario in SCENARIOS:
+            if scenario.band:
+                assert len(scenario.data_basis) > 40, f"{scenario.id} does not name its record"
 
     def test_scenarios_target_implemented_agents_only(self):
         assert all(s.agent_key in IMPLEMENTED for s in SCENARIOS)
