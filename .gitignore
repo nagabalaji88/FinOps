@@ -33,6 +33,10 @@ release/*
 !release/*.zip
 !release/*.sha256
 
+# Agent tooling. These accumulate machine-specific paths and per-developer command
+# allowlists, which are not the repository's business to carry.
+.claude/
+
 # Editors / OS
 .DS_Store
 .idea/
