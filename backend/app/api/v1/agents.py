@@ -215,6 +215,7 @@ async def get_agent(agent_key: str, session: SessionDep, principal: PrincipalDep
             "description": t.description,
             "category": t.category,
             "requires_approval": t.requires_approval,
+            "requires_human_review": t.requires_human_review,
             "writes_data": t.writes_data,
             "timeout_seconds": t.timeout_seconds,
             "schema": t.json_schema,

@@ -329,9 +329,10 @@ class TicketArgs(BaseModel):
     "Create a support ticket in the servicing system for follow-up by a human team.",
     TicketArgs,
     category="banking",
+    # A write that is not in REVIEW_EXEMPT_WRITES is gated; see app/tools/base.py. This
+    # one raises a ticket a customer will be contacted about, so it is reviewed.
     writes_data=True,
     idempotent=False,
-    requires_approval=False,
 )
 async def create_support_ticket(args: TicketArgs, ctx: ToolContext) -> dict[str, Any]:
     customer_id = ctx.state.get(AUTH_STATE_KEY)

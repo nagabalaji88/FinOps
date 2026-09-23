@@ -118,17 +118,32 @@ def _create_or_defer_to_alembic(connection: Any) -> None:
         log.info("schema_stamped", revision=head)
 
 
+#: Demo identities, one per role, for a local or dev environment to click through with.
+#: They exist so the console has something to show; they all share
+#: ``BOOTSTRAP_ADMIN_PASSWORD``, which is why production never creates them.
+DEMO_IDENTITIES = [
+    ("operator@finops.local", "Operations Engineer", ["operator"], "Technology"),
+    ("approver@finops.local", "Compliance Approver", ["approver"], "Compliance"),
+    ("auditor@finops.local", "Internal Auditor", ["auditor"], "Audit"),
+    ("builder@finops.local", "Agent Builder", ["agent_builder"], "Technology"),
+]
+
+
 async def seed_identities(session: AsyncSession) -> dict[str, Any]:
     existing = int((await session.execute(select(func.count(User.id)))).scalar_one())
     if existing:
         return {"users_created": 0}
-    users = [
-        (settings.bootstrap_admin_email, "Platform Administrator", ["admin"], "Technology"),
-        ("operator@finops.local", "Operations Engineer", ["operator"], "Technology"),
-        ("approver@finops.local", "Compliance Approver", ["approver"], "Compliance"),
-        ("auditor@finops.local", "Internal Auditor", ["auditor"], "Audit"),
-        ("builder@finops.local", "Agent Builder", ["agent_builder"], "Technology"),
-    ]
+    if settings.is_production and settings.seed_demo_users:
+        # Startup already refuses this combination; belt and braces, because seeding also
+        # runs from `python -m app.cli` where the API's lifespan checks never execute.
+        raise RuntimeError(
+            "SEED_DEMO_USERS must be false in production: the demo identities share "
+            "BOOTSTRAP_ADMIN_PASSWORD, so seeding them hands four more roles to anyone "
+            "holding the admin secret"
+        )
+    users = [(settings.bootstrap_admin_email, "Platform Administrator", ["admin"], "Technology")]
+    if settings.seed_demo_users:
+        users += DEMO_IDENTITIES
     for email, name, roles, department in users:
         session.add(
             User(
@@ -143,7 +158,10 @@ async def seed_identities(session: AsyncSession) -> dict[str, Any]:
     log.info(
         "identities_seeded",
         count=len(users),
-        note="All seeded accounts share BOOTSTRAP_ADMIN_PASSWORD - rotate before production",
+        demo_identities=settings.seed_demo_users,
+        note="Seeded accounts share BOOTSTRAP_ADMIN_PASSWORD - rotate before production"
+        if settings.seed_demo_users
+        else "Only the administrator was seeded",
     )
     return {"users_created": len(users)}
 
@@ -717,9 +735,19 @@ async def seed_sample_banking(
             )
             bars += 1
 
+    def sample_customer(position: int) -> Customer:
+        """A seeded customer by position, wrapping when fewer were asked for.
+
+        The sample size is a CLI argument (`seed-banking --customers N`), so indexing a
+        fixed position turns a smaller run into an IndexError partway through seeding --
+        which is exactly what `--customers 6` did once the fixtures below reached the
+        tenth customer.
+        """
+        return created_customers[position % len(created_customers)]
+
     portfolio = Portfolio(
         portfolio_code="PF-BALANCED-01",
-        customer_id=created_customers[0].id,
+        customer_id=sample_customer(0).id,
         name="Balanced Growth Mandate",
         strategy="balanced",
         base_currency="INR",
@@ -749,7 +777,7 @@ async def seed_sample_banking(
     # research agent's mandate check answer something other than "compliant".
     concentrated = Portfolio(
         portfolio_code="PF-CONCENTRATED-01",
-        customer_id=created_customers[3].id,
+        customer_id=sample_customer(3).id,
         name="Technology Conviction Mandate",
         strategy="growth",
         base_currency="INR",
@@ -760,7 +788,7 @@ async def seed_sample_banking(
     )
     income = Portfolio(
         portfolio_code="PF-INCOME-01",
-        customer_id=created_customers[9].id,
+        customer_id=sample_customer(9).id,
         name="Conservative Income Mandate",
         strategy="income",
         base_currency="INR",
@@ -803,16 +831,16 @@ async def seed_sample_banking(
     session.add(
         KycCase(
             case_number="KYC-2026-0001",
-            applicant_name=created_customers[1].full_name,
-            applicant_email=created_customers[1].email,
-            applicant_phone=created_customers[1].phone,
-            date_of_birth=created_customers[1].date_of_birth,
+            applicant_name=sample_customer(1).full_name,
+            applicant_email=sample_customer(1).email,
+            applicant_phone=sample_customer(1).phone,
+            date_of_birth=sample_customer(1).date_of_birth,
             nationality="IN",
             declared_address={
-                "line1": created_customers[1].address_line1,
-                "city": created_customers[1].address_city,
-                "state": created_customers[1].address_state,
-                "postcode": created_customers[1].address_postcode,
+                "line1": sample_customer(1).address_line1,
+                "city": sample_customer(1).address_city,
+                "state": sample_customer(1).address_state,
+                "postcode": sample_customer(1).address_postcode,
                 "country": "India",
             },
             status="in_progress",

@@ -12,7 +12,7 @@ import functools
 import os
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # The test suite isolates itself by clearing provider credentials out of os.environ, which a
@@ -47,6 +47,21 @@ class Settings(BaseSettings):
         ]
     )
     root_path: str = ""
+    #: Host headers this deployment answers to. A wildcard lets an attacker mint absolute
+    #: URLs (password-reset links, redirects) pointing at a host they control, so
+    #: production refuses to start on one -- see :meth:`production_misconfigurations`.
+    trusted_hosts: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"])
+    #: Peers whose ``X-Forwarded-For``/``X-Forwarded-Proto`` this deployment believes.
+    #: Read by uvicorn itself from ``FORWARDED_ALLOW_IPS``; mirrored here so that
+    #: :meth:`production_misconfigurations` can refuse a wildcard, which would let any
+    #: caller forge the client IP that rate limiting throttles on and the audit trail records.
+    forwarded_allow_ips: str = "127.0.0.1"
+    #: Serve ``/docs``, ``/redoc`` and ``/openapi.json``. Unset means off in production:
+    #: the schema enumerates every route and its shape for an unauthenticated caller.
+    expose_api_docs: bool | None = None
+    #: Serve ``/metrics`` unauthenticated. Unset means off in production; scrape it over the
+    #: cluster network or put the monitoring layer in front of it.
+    expose_metrics_endpoint: bool | None = None
 
     # --- Database -----------------------------------------------------------
     database_url: str = "sqlite+aiosqlite:///./finops.db"
@@ -62,6 +77,19 @@ class Settings(BaseSettings):
     bootstrap_admin_email: str = "admin@finops.local"
     bootstrap_admin_password: str = "ChangeMe!2026"
     mfa_issuer: str = "FinOps Command Center"
+    #: Key for field-level encryption of secrets at rest, independent of ``jwt_secret``
+    #: so that rotating the signing key does not strand every stored provider credential.
+    #: Any string is accepted and stretched; 32 random bytes base64-encoded is the
+    #: intended form. Unset falls back to ``jwt_secret`` for backwards compatibility,
+    #: which production refuses to start on.
+    secret_encryption_key: str | None = None
+    #: Failed logins tolerated per minute from one source for one account before the
+    #: endpoint returns 429. Successful logins never consume budget, so this throttles
+    #: password guessing without throttling the people who know their password.
+    login_failure_limit_per_minute: int = 10
+    #: Seed the operator/approver/auditor/builder demo identities alongside the admin.
+    #: They all share ``bootstrap_admin_password``, so production refuses to seed them.
+    seed_demo_users: bool = True
 
     # Keycloak / OIDC (optional SSO)
     keycloak_url: str | None = None
@@ -85,6 +113,10 @@ class Settings(BaseSettings):
     minio_secret_key: str | None = None
     minio_bucket: str = "finops-artifacts"
     minio_secure: bool = False
+    #: Treat a local-filesystem artifact store as a failed readiness check. The container
+    #: mounts an ``emptyDir``, so a silent fallback loses every artifact on restart and
+    #: shares none of them between replicas. Defaults on outside local/dev.
+    require_durable_artifact_store: bool | None = None
     vault_addr: str | None = None
     vault_token: str | None = None
     vault_mount: str = "secret"
@@ -185,9 +217,9 @@ class Settings(BaseSettings):
     data_retention_days: int = 400
     max_concurrent_executions: int = 32
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "trusted_hosts", mode="before")
     @classmethod
-    def _split_origins(cls, value: Any) -> list[str]:
+    def _split_origins(cls, value: Any, info: ValidationInfo) -> list[str]:
         """Accept a comma-separated list, a JSON array, or a real list.
 
         Deployments write `CORS_ORIGINS=https://a.example,https://b.example`; Helm and
@@ -205,8 +237,8 @@ class Settings(BaseSettings):
                     decoded = json.loads(text)
                 except json.JSONDecodeError as exc:
                     raise ValueError(
-                        f"CORS_ORIGINS looks like JSON but will not parse: {exc}. "
-                        "Use a comma-separated list instead, for example "
+                        f"{(info.field_name or '').upper()} looks like JSON but will not "
+                        f"parse: {exc}. Use a comma-separated list instead, for example "
                         "https://execute.example.com,https://console.example.com"
                     ) from exc
                 return [str(item).strip() for item in decoded if str(item).strip()]
@@ -220,6 +252,70 @@ class Settings(BaseSettings):
     @property
     def sync_database_url(self) -> str:
         return self.database_url.replace("+asyncpg", "+psycopg2").replace("+aiosqlite", "")
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
+
+    @property
+    def api_docs_enabled(self) -> bool:
+        return not self.is_production if self.expose_api_docs is None else self.expose_api_docs
+
+    @property
+    def metrics_endpoint_enabled(self) -> bool:
+        if self.expose_metrics_endpoint is None:
+            return not self.is_production
+        return self.expose_metrics_endpoint
+
+    @property
+    def durable_artifact_store_required(self) -> bool:
+        if self.require_durable_artifact_store is not None:
+            return self.require_durable_artifact_store
+        return self.environment in {"staging", "production"}
+
+    @property
+    def secret_encryption_material(self) -> tuple[str, bool]:
+        """The key used to encrypt secrets at rest, and whether it is the JWT fallback."""
+        if self.secret_encryption_key:
+            return self.secret_encryption_key, False
+        return self.jwt_secret, True
+
+    def production_misconfigurations(self) -> list[str]:
+        """Settings that must not reach production at their shipped defaults.
+
+        Each of these is a control that silently does nothing when left alone: a default
+        signing key forges its own tokens, a wildcard host answers to any name, and a
+        shared bootstrap password hands five roles to whoever reads the example file.
+        Startup refuses rather than serving traffic that looks protected and is not.
+        """
+        defaults = Settings.model_fields
+        problems: list[str] = []
+        if self.jwt_secret == defaults["jwt_secret"].default:
+            problems.append("JWT_SECRET is still the shipped default")
+        if len(self.jwt_secret) < 32:
+            problems.append("JWT_SECRET is shorter than 32 characters")
+        if not self.secret_encryption_key:
+            problems.append(
+                "SECRET_ENCRYPTION_KEY is unset, so secrets at rest are keyed off JWT_SECRET "
+                "and rotating it would strand every stored credential"
+            )
+        if self.bootstrap_admin_password == defaults["bootstrap_admin_password"].default:
+            problems.append("BOOTSTRAP_ADMIN_PASSWORD is still the shipped default")
+        if self.seed_demo_users:
+            problems.append(
+                "SEED_DEMO_USERS is on, which would create operator/approver/auditor/builder "
+                "accounts sharing BOOTSTRAP_ADMIN_PASSWORD"
+            )
+        if "*" in self.trusted_hosts:
+            problems.append("TRUSTED_HOSTS contains '*'; set the hostnames this deployment serves")
+        if "*" in self.forwarded_allow_ips:
+            problems.append(
+                "FORWARDED_ALLOW_IPS contains '*'; set the ingress addresses whose "
+                "X-Forwarded-For this deployment should believe"
+            )
+        if "*" in self.cors_origins:
+            problems.append("CORS_ORIGINS contains '*'; set the browser origins that may call the API")
+        return problems
 
 
 @functools.lru_cache

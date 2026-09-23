@@ -103,5 +103,21 @@ def permissions_for_roles(roles: list[str]) -> set[Permission]:
     return perms
 
 
+_BY_VALUE: dict[str, Permission] = {str(p): p for p in Permission}
+
+
+def permissions_from_scopes(scopes: list[str]) -> set[Permission]:
+    """Resolve scope strings to permissions, ignoring any that name nothing.
+
+    Used to narrow an API key to less than its owner holds. Unknown scopes are rejected at
+    key creation, so silently dropping one here can only ever remove permission.
+    """
+    return {_BY_VALUE[s] for s in (str(scope).strip() for scope in scopes) if s in _BY_VALUE}
+
+
+def unknown_scopes(scopes: list[str]) -> list[str]:
+    return sorted({s for s in (str(scope).strip() for scope in scopes) if s and s not in _BY_VALUE})
+
+
 def has_permission(roles: list[str], permission: Permission) -> bool:
     return permission in permissions_for_roles(roles)

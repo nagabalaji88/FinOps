@@ -53,6 +53,7 @@ async def list_tools(session: SessionDep, principal: PrincipalDep) -> list[dict[
                 "description": tool.description,
                 "category": tool.category,
                 "requires_approval": tool.requires_approval,
+                "requires_human_review": tool.requires_human_review,
                 "approval_risk": tool.approval_risk,
                 "writes_data": tool.writes_data,
                 "idempotent": tool.idempotent,
@@ -92,10 +93,11 @@ async def invoke_tool(
 ) -> dict[str, Any]:
     principal.require(Permission.TOOL_INVOKE)
     tool = tool_registry.get(tool_name)
-    if tool.requires_approval:
+    if tool.requires_human_review:
         raise ValidationError(
             f"Tool '{tool_name}' requires human approval and can only run inside an agent "
             f"execution where the approval gate is enforced",
+            details={"writes_data": tool.writes_data, "approval_risk": tool.approval_risk},
         )
     result = await tool_registry.invoke(
         tool_name,

@@ -32,4 +32,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
   CMD curl -fsS http://localhost:8000/health/live || exit 1
 ENTRYPOINT ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-CMD ["--workers", "4", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# --forwarded-allow-ips is read from FORWARDED_ALLOW_IPS, which uvicorn honours and which
+# defaults to 127.0.0.1 in app/core/config.py. It is deliberately not "*": trusting any
+# peer's X-Forwarded-For lets a caller forge the client IP that rate limiting throttles on
+# and that the audit trail records. Set it to the ingress addresses for the cluster.
+CMD ["--workers", "4", "--proxy-headers"]

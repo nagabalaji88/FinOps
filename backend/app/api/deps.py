@@ -14,14 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import AuthError, ForbiddenError
 from app.core.logging import user_id_ctx
-from app.core.rbac import Permission, has_permission, permissions_for_roles
-from app.core.resilience import TokenBucketLimiter
+from app.core.rbac import Permission, has_permission, permissions_for_roles, permissions_from_scopes
+from app.core.resilience import limiter_for
 from app.core.security import decode_token, hash_api_key
 from app.db.models.identity import ApiKey, AuditLog, User
 from app.db.session import get_session
 
 bearer_scheme = HTTPBearer(auto_error=False)
-limiter = TokenBucketLimiter(settings.rate_limit_per_minute)
 
 
 async def db_session() -> AsyncIterator[AsyncSession]:
@@ -45,6 +44,12 @@ class Principal:
         self.auth_method = auth_method
         self.api_key = api_key
         self.permissions = permissions_for_roles(self.roles)
+        if api_key is not None and api_key.scopes:
+            # A scoped key is a request for *less* than its owner can do -- the point of
+            # minting one for a single integration. Granting the owner's whole role instead
+            # made the stored scopes decorative, so a key cut to `agent:execute` could also
+            # administer users. Intersecting can only ever narrow.
+            self.permissions &= permissions_from_scopes(list(api_key.scopes))
 
     def require(self, permission: Permission) -> None:
         if permission not in self.permissions:
@@ -86,10 +91,7 @@ async def current_principal(
     request.state.principal = principal
     key = principal.api_key.id if principal.api_key else principal.id
     rate = principal.api_key.rate_limit_per_minute if principal.api_key else settings.rate_limit_per_minute
-    if rate != limiter.capacity:
-        await TokenBucketLimiter(rate).enforce(key)
-    else:
-        await limiter.enforce(key)
+    await limiter_for(rate).enforce(key)
     return principal
 
 

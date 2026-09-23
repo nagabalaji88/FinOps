@@ -65,6 +65,34 @@ class ToolResult:
         }
 
 
+#: Writes that do not need a human decision, and the reason each one does not.
+#:
+#: ``writes_data`` used to be advisory: the engine gated ``requires_approval`` alone, so a
+#: tool could declare that it reaches a system of record and still run unattended. It is
+#: now the gate, and a write is exempt only by appearing here. Everything in this table
+#: either appends to an evidence or audit trail, or stores a value it just computed --
+#: nothing a reviewer could meaningfully accept or decline, and nothing a customer sees.
+#: Adding an entry is a security decision; it belongs in review, which is why the reason is
+#: required rather than a bare set of names.
+REVIEW_EXEMPT_WRITES: dict[str, str] = {
+    "attach_case_evidence": "appends evidence to a case; append-only, nothing is amended",
+    "authenticate_customer": "records an authentication attempt; changes no customer record",
+    "calculate_compensation": "stores a computed figure; paying it needs its own approval",
+    "calculate_kyc_risk_score": "stores a derived score; the onboarding decision is gated",
+    "classify_document": "records a document classification against the case",
+    "evaluate_promise_performance": "records an assessment of a promise already made",
+    "face_match": "records a biometric comparison result as case evidence",
+    "log_contact_attempt": "appends to the contact log; eligibility gates the contact itself",
+    "monitor_transactions": "persists detection alerts; filing a report is gated separately",
+    "ocr_document": "records extracted text against the case",
+    "screen_payment_parties": "records a screening result; releasing the payment is gated",
+    "validate_address": "records an address check result",
+    "verify_aadhaar": "records an identity check result as case evidence",
+    "verify_pan": "records an identity check result as case evidence",
+    "verify_passport": "records an identity check result as case evidence",
+}
+
+
 @dataclass
 class Tool:
     name: str
@@ -80,6 +108,18 @@ class Tool:
     idempotent: bool = True
     writes_data: bool = False
     tags: list[str] = field(default_factory=list)
+
+    @property
+    def requires_human_review(self) -> bool:
+        """Whether a human must decide before this tool runs.
+
+        The single predicate both the execution engine and the direct-invocation endpoint
+        consult, so a write cannot be reached unreviewed through one path because the other
+        was the one that checked.
+        """
+        if self.requires_approval:
+            return True
+        return self.writes_data and self.name not in REVIEW_EXEMPT_WRITES
 
     @property
     def json_schema(self) -> dict[str, Any]:

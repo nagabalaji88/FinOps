@@ -18,7 +18,7 @@ from app.api.v1.router import api_router
 from app.core.bus import bus
 from app.core.cache import cache
 from app.core.config import settings
-from app.core.errors import AppError
+from app.core.errors import AppError, NotFoundError
 from app.core.logging import configure_logging, get_logger, request_id_ctx, trace_id_ctx
 from app.core.metrics import http_request_duration, http_requests_total, render_metrics
 from app.core.otel import current_trace_ids, setup_tracing
@@ -54,6 +54,18 @@ async def lifespan(app: FastAPI):
     from app.rag.vectorstore import init_vector_store
     from app.services import telemetry
     from app.tools import registry as tool_registry  # noqa: F401 - registers tools
+
+    # Refuse to serve production traffic with controls that only look enabled. Each of
+    # these defaults is inert -- a shipped signing key, a wildcard host, a shared bootstrap
+    # password -- and a deployment that starts anyway is worse than one that does not,
+    # because nothing downstream reports the control as missing.
+    if problems := settings.production_misconfigurations():
+        if settings.is_production:
+            raise RuntimeError(
+                "Refusing to start in production with insecure configuration:\n"
+                + "\n".join(f"  - {problem}" for problem in problems)
+            )
+        log.warning("insecure_configuration", environment=settings.environment, problems=problems)
 
     setup_tracing(app, engine)
     await cache.connect()
@@ -102,9 +114,11 @@ app = FastAPI(
     title=settings.app_name,
     description=DESCRIPTION,
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    # The OpenAPI schema enumerates every route, payload shape and error for a caller who
+    # has not authenticated. Off in production unless a deployment opts back in.
+    docs_url="/docs" if settings.api_docs_enabled else None,
+    redoc_url="/redoc" if settings.api_docs_enabled else None,
+    openapi_url="/openapi.json" if settings.api_docs_enabled else None,
     lifespan=lifespan,
     root_path=settings.root_path,
 )
@@ -118,8 +132,10 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Request-ID", "X-Trace-ID", "X-Response-Time-Ms"],
 )
-if settings.environment == "production":
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+if "*" not in settings.trusted_hosts:
+    # A wildcard is not a host allowlist, and production startup already refuses one, so
+    # the middleware is only worth adding when real hostnames were configured.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
 
 
 @app.middleware("http")
@@ -206,6 +222,10 @@ async def liveness() -> dict[str, Any]:
 async def readiness() -> Response:
     database_ok = await ping_database()
     providers = model_router.configured_providers()
+    # The container mounts an emptyDir, so a filesystem artifact store loses every artifact
+    # on restart and shares none of them between replicas. Reporting ready on that fallback
+    # is what turns a missing object store into silent data loss instead of a failed rollout.
+    durable_storage_ok = store.healthy or not settings.durable_artifact_store_required
     checks = {
         "database": "ok" if database_ok else "unavailable",
         "cache": cache.backend,
@@ -214,16 +234,23 @@ async def readiness() -> Response:
         "secrets": secret_manager.backend,
         "llm_providers": providers or "none_configured",
     }
-    ready = database_ok
+    warnings = []
+    if not providers:
+        warnings.append(
+            "No LLM provider configured - agent executions will fail with "
+            "provider_not_configured until one is set"
+        )
+    if not durable_storage_ok:
+        warnings.append(
+            "Artifact storage fell back to local disk, which this environment requires to be "
+            "durable - set MINIO_ENDPOINT/MINIO_ACCESS_KEY/MINIO_SECRET_KEY, or set "
+            "REQUIRE_DURABLE_ARTIFACT_STORE=false to accept ephemeral artifacts"
+        )
+    ready = database_ok and durable_storage_ok
     body = {
         "status": "ready" if ready else "not_ready",
         "checks": checks,
-        "warnings": []
-        if providers
-        else [
-            "No LLM provider configured - agent executions will fail with "
-            "provider_not_configured until one is set"
-        ],
+        "warnings": warnings,
     }
     return JSONResponse(content=body, status_code=200 if ready else 503)
 
@@ -235,6 +262,10 @@ async def startup_probe() -> dict[str, Any]:
 
 @app.get("/metrics", tags=["health"], response_class=PlainTextResponse)
 async def metrics() -> Response:
+    # Series labels carry route paths, model names, agent keys and tool names, so an open
+    # /metrics describes the platform's internals and its traffic to anyone who asks.
+    if not settings.metrics_endpoint_enabled:
+        raise NotFoundError("Metrics are not exposed on this deployment")
     return Response(content=render_metrics(), media_type="text/plain; version=0.0.4")
 
 
@@ -244,8 +275,8 @@ async def root() -> dict[str, Any]:
         "service": settings.app_name,
         "version": "1.0.0",
         "environment": settings.environment,
-        "docs": "/docs",
+        "docs": "/docs" if settings.api_docs_enabled else None,
         "api": settings.api_prefix,
         "health": "/health/ready",
-        "metrics": "/metrics",
+        "metrics": "/metrics" if settings.metrics_endpoint_enabled else None,
     }

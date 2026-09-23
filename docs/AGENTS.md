@@ -77,10 +77,19 @@ Rules that keep tools safe:
 - **Validate with Pydantic.** The schema is what the model sees; a bad argument returns a
   structured error, not an exception.
 - **Mark writes.** `writes_data=True` disables retry unless the operation is genuinely
-  idempotent, and surfaces in the approval payload.
-- **Gate consequential actions.** `requires_approval=True` suspends the execution. Use it
-  for anything a customer or regulator would see: escalation, KYC decisions, SAR drafting,
-  case closure, research publication.
+  idempotent — and it is the approval gate. A tool that writes suspends the execution for a
+  human decision unless its name appears in `REVIEW_EXEMPT_WRITES` in `app/tools/base.py`
+  with a reason. That table is the whole exemption list, and adding to it is a security
+  decision, so it belongs in review. It was previously advisory metadata: the engine
+  consulted `requires_approval` alone, so a tool could declare that it reaches a system of
+  record and still run unattended.
+- **Gate consequential actions.** `requires_approval=True` asks for review regardless of
+  whether the tool writes. Use it for anything a customer or regulator would see:
+  escalation, KYC decisions, SAR drafting, case closure, research publication. Set
+  `approval_risk` to how the reviewer should weigh it.
+- **One predicate, both paths.** `Tool.requires_human_review` combines the two, and both
+  the execution engine and `POST /tools/{name}/invoke` check it — a gated write cannot be
+  reached through the endpoint because the engine was the one that checked.
 - **Return data, not prose.** The model composes the narrative; the tool returns facts.
 - **Fail loudly.** Raise `NotFoundError` or `ValidationError` with details rather than
   returning an empty result that reads like a real answer.

@@ -637,7 +637,7 @@ class ReasoningNode(Node):
                 continue
 
             tool = registry.get(call.name)
-            needs_approval = tool.requires_approval and not state.approved_tool_calls.get(call.id)
+            needs_approval = tool.requires_human_review and not state.approved_tool_calls.get(call.id)
             if needs_approval:
                 approval = await create_approval(
                     ctx,

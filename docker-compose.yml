@@ -22,9 +22,16 @@ x-api-env: &api-env
   VAULT_TOKEN: ${VAULT_TOKEN:-finops-root-token}
   CELERY_BROKER_URL: redis://redis:6379/1
   CELERY_RESULT_BACKEND: redis://redis:6379/2
+  # This file brings up a development stack; ENVIRONMENT defaults to dev and these
+  # defaults are known values, so it must not be pointed at production. Set ENVIRONMENT
+  # and the API will refuse to start until every one of them is replaced.
   JWT_SECRET: ${JWT_SECRET:-change-me-in-production-please-use-vault}
+  SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:-}
   BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@finops.local}
   BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-ChangeMe!2026}
+  SEED_DEMO_USERS: ${SEED_DEMO_USERS:-true}
+  TRUSTED_HOSTS: ${TRUSTED_HOSTS:-*}
+  FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
   # AI providers - supply the ones your institution has contracted
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

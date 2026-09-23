@@ -191,7 +191,18 @@ class _Bucket:
 
 
 class TokenBucketLimiter:
-    """In-process limiter; backed by Redis when the cache adapter is distributed."""
+    """Token bucket, shared through Redis when the cache adapter is distributed.
+
+    Held only in process, a limit is enforced once per worker and once per pod: the real
+    ceiling becomes the configured rate multiplied by the replica count, and it resets
+    whenever a pod restarts. When Redis is reachable the counter lives there instead, as a
+    one-minute fixed window -- coarser than a bucket, but one ceiling for the deployment.
+    """
+
+    #: The local map is keyed by caller, so an unbounded one is a memory leak an
+    #: unauthenticated caller can drive by varying the key. Full buckets are evicted first
+    #: because a refilled bucket carries no information a missing one does not.
+    max_local_keys = 50_000
 
     def __init__(self, rate_per_minute: int, burst: int | None = None):
         self.rate = rate_per_minute / 60.0
@@ -200,10 +211,36 @@ class TokenBucketLimiter:
         self._lock = asyncio.Lock()
 
     async def check(self, key: str, cost: float = 1.0) -> tuple[bool, float]:
+        shared = await self._check_shared(key, cost)
+        return shared if shared is not None else await self._check_local(key, cost)
+
+    async def _check_shared(self, key: str, cost: float) -> tuple[bool, float] | None:
+        """Count against Redis, or return ``None`` to let the caller fall back locally."""
+        from app.core.cache import cache
+
+        if not cache.healthy:
+            return None
+        window = int(time.time() // 60)
+        counter = f"ratelimit:{key}:{window}"
+        try:
+            if cost <= 0:
+                used = float(await cache.get(counter, scope="rate_limit") or 0)
+            else:
+                used = float(await cache.incr(counter, max(1, int(cost)), ttl=120))
+        except Exception as exc:  # pragma: no cover - a limiter must not fail a request
+            log.warning("rate_limit_shared_unavailable", error=str(exc))
+            return None
+        if used <= self.capacity:
+            return True, max(0.0, self.capacity - used)
+        return False, round(60.0 - (time.time() % 60.0), 2)
+
+    async def _check_local(self, key: str, cost: float) -> tuple[bool, float]:
         async with self._lock:
             now = time.monotonic()
             bucket = self._buckets.get(key)
             if bucket is None:
+                if len(self._buckets) >= self.max_local_keys:
+                    self._evict(now)
                 bucket = _Bucket(tokens=self.capacity, updated=now)
                 self._buckets[key] = bucket
             bucket.tokens = min(self.capacity, bucket.tokens + (now - bucket.updated) * self.rate)
@@ -214,12 +251,38 @@ class TokenBucketLimiter:
             retry_after = (cost - bucket.tokens) / self.rate
             return False, retry_after
 
+    def _evict(self, now: float) -> None:
+        for key, bucket in list(self._buckets.items()):
+            if bucket.tokens + (now - bucket.updated) * self.rate >= self.capacity:
+                del self._buckets[key]
+        if len(self._buckets) >= self.max_local_keys:
+            # Every remaining bucket is still throttling something. Forget the oldest
+            # tenth rather than growing without bound.
+            oldest = sorted(self._buckets.items(), key=lambda item: item[1].updated)
+            for key, _ in oldest[: max(1, self.max_local_keys // 10)]:
+                del self._buckets[key]
+
     async def enforce(self, key: str, cost: float = 1.0) -> None:
         ok, info = await self.check(key, cost)
         if not ok:
             raise RateLimitError(
                 "Rate limit exceeded", details={"retry_after_seconds": round(info, 2), "key": key}
             )
+
+
+_limiters: dict[int, TokenBucketLimiter] = {}
+
+
+def limiter_for(rate_per_minute: int) -> TokenBucketLimiter:
+    """The limiter for a rate, created once.
+
+    Building one per request handed every request a brand-new full bucket, which is the
+    same as not limiting at all -- the reason an API key with a custom rate was unthrottled.
+    """
+    limiter = _limiters.get(rate_per_minute)
+    if limiter is None:
+        limiter = _limiters[rate_per_minute] = TokenBucketLimiter(rate_per_minute)
+    return limiter
 
 
 class Bulkhead:
