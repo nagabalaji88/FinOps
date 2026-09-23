@@ -126,11 +126,11 @@ web:
   execute:
     enabled: true
     host: execute.finops.example.com
-    image: { repository: ghcr.io/finops/agent-execute }
+    image: { repository: ghcr.io/nagabalaji88/agent-execute }
   console:
     enabled: true
     host: console.finops.example.com
-    image: { repository: ghcr.io/finops/agent-console }
+    image: { repository: ghcr.io/nagabalaji88/agent-console }
 ```
 
 Either application can be scaled, upgraded or disabled without touching the other. Set

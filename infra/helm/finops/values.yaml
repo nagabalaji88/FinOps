@@ -3,10 +3,13 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# Images are published by .github/workflows/ci.yml to ghcr.io/<repository owner>/<image>.
+# An empty tag resolves to the chart's appVersion, which a release tag (v1.2.3) builds
+# through the workflow's semver rule; set it explicitly to pin a branch or SHA tag instead.
 image:
   api:
-    repository: ghcr.io/finops/agent-api
-    tag: "1.0.0"
+    repository: ghcr.io/nagabalaji88/agent-api
+    tag: ""
     pullPolicy: IfNotPresent
 imagePullSecrets: []
 
@@ -34,8 +37,8 @@ web:
     host: execute.finops.example.com
     replicaCount: 2
     image:
-      repository: ghcr.io/finops/agent-execute
-      tag: "1.0.0"
+      repository: ghcr.io/nagabalaji88/agent-execute
+      tag: ""
       pullPolicy: IfNotPresent
     resources:
       requests: { cpu: 50m, memory: 96Mi }
@@ -45,8 +48,8 @@ web:
     host: console.finops.example.com
     replicaCount: 2
     image:
-      repository: ghcr.io/finops/agent-console
-      tag: "1.0.0"
+      repository: ghcr.io/nagabalaji88/agent-console
+      tag: ""
       pullPolicy: IfNotPresent
     resources:
       requests: { cpu: 50m, memory: 96Mi }
@@ -68,6 +71,10 @@ migration:
   seedPlatform: true
   # Loads the sample banking environment; leave false for production.
   seedSampleBanking: false
+  # Creates operator/approver/auditor/builder accounts that all share
+  # BOOTSTRAP_ADMIN_PASSWORD. A production API refuses to seed them; turn this on only
+  # for a demo cluster.
+  seedDemoUsers: false
 
 ingress:
   enabled: true
@@ -93,6 +100,19 @@ config:
   dataRetentionDays: "400"
   rateLimitPerMinute: "240"
   corsOrigins: https://execute.finops.example.com,https://console.finops.example.com
+  # Host headers the API answers to. Empty falls back to the web.<app>.host values above,
+  # which is what an ingress actually sends. A production API refuses to start on "*".
+  trustedHosts: ""
+  # Peers whose X-Forwarded-For the API believes. Point this at the ingress controller's
+  # pod CIDR; "*" lets any caller forge the client IP that throttling and auditing use.
+  forwardedAllowIps: 10.0.0.0/8
+  # The OpenAPI schema enumerates every route for an unauthenticated caller, and nothing
+  # in the cluster consumes it, so it stays off. The ingress routes only /api, /health and
+  # / (the web app), so neither path is reachable from outside regardless.
+  exposeApiDocs: "false"
+  # Left on because the ServiceMonitor below scrapes /metrics on the pod directly. It is
+  # not routed by the ingress; the NetworkPolicy is what keeps it to the cluster.
+  exposeMetricsEndpoint: "true"
   otelEndpoint: http://otel-collector.observability:4318
   qdrantUrl: http://finops-qdrant:6333
   kafkaBootstrapServers: ""

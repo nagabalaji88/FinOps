@@ -24,6 +24,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: api
 {{- end -}}
 
+{{/*
+Host headers the API answers to. Defaults to the hosts of whichever front ends are
+enabled, which is what the ingress actually sends; a production API refuses to start on a
+wildcard, so there is deliberately no "*" fallback.
+*/}}
+{{- define "finops.trustedHosts" -}}
+{{- if .Values.config.trustedHosts -}}
+{{- .Values.config.trustedHosts -}}
+{{- else -}}
+{{- $hosts := list -}}
+{{- if .Values.web.execute.enabled -}}{{- $hosts = append $hosts .Values.web.execute.host -}}{{- end -}}
+{{- if .Values.web.console.enabled -}}{{- $hosts = append $hosts .Values.web.console.host -}}{{- end -}}
+{{- join "," (compact $hosts) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "finops.envFrom" -}}
 - configMapRef:
     name: {{ include "finops.fullname" . }}-config

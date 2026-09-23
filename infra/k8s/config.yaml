@@ -27,6 +27,19 @@ data:
   DATA_RETENTION_DAYS: "400"
   # Comma-separated. Both applications call this API, so both origins must be listed.
   CORS_ORIGINS: https://execute.finops.example.com,https://console.finops.example.com
+  # Host headers the API answers to. A wildcard lets an attacker mint absolute URLs
+  # pointing at a host they control; a production API refuses to start on one.
+  TRUSTED_HOSTS: execute.finops.example.com,console.finops.example.com
+  # The ingress controller's pod CIDR. Trusting every peer lets any caller forge the
+  # client IP that rate limiting throttles on and the audit trail records.
+  FORWARDED_ALLOW_IPS: 10.0.0.0/8
+  # The OpenAPI schema describes every route to an unauthenticated caller and nothing in
+  # the cluster reads it. /metrics stays on for the Prometheus scrape; neither path is
+  # routed by the ingress, which only forwards /api, /health and /.
+  EXPOSE_API_DOCS: "false"
+  EXPOSE_METRICS_ENDPOINT: "true"
+  # The demo identities all share BOOTSTRAP_ADMIN_PASSWORD; production refuses to seed them.
+  SEED_DEMO_USERS: "false"
 ---
 # Secrets are supplied by the External Secrets Operator from Vault.
 # The manifest below documents the required keys; never commit real values.
@@ -44,6 +57,10 @@ spec:
   data:
     - { secretKey: DATABASE_URL, remoteRef: { key: finops/database, property: url } }
     - { secretKey: JWT_SECRET, remoteRef: { key: finops/auth, property: jwt_secret } }
+    # Separate from JWT_SECRET on purpose: sharing them means one weak value compromises
+    # both the tokens and every stored provider credential, and rotating the signing key
+    # would make the stored credentials undecryptable.
+    - { secretKey: SECRET_ENCRYPTION_KEY, remoteRef: { key: finops/auth, property: secret_encryption_key } }
     - { secretKey: BOOTSTRAP_ADMIN_PASSWORD, remoteRef: { key: finops/auth, property: bootstrap_password } }
     - { secretKey: OPENAI_API_KEY, remoteRef: { key: finops/providers, property: openai } }
     - { secretKey: ANTHROPIC_API_KEY, remoteRef: { key: finops/providers, property: anthropic } }

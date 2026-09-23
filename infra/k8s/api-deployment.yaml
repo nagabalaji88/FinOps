@@ -34,7 +34,7 @@ spec:
             matchLabels: { app: finops-api }
       initContainers:
         - name: migrate
-          image: ghcr.io/finops/agent-api:1.0.0
+          image: ghcr.io/nagabalaji88/agent-api:1.0.0
           command: ["alembic", "upgrade", "head"]
           envFrom:
             - configMapRef: { name: finops-config }
@@ -45,9 +45,12 @@ spec:
             capabilities: { drop: ["ALL"] }
       containers:
         - name: api
-          image: ghcr.io/finops/agent-api:1.0.0
+          image: ghcr.io/nagabalaji88/agent-api:1.0.0
           imagePullPolicy: IfNotPresent
-          args: ["--workers", "4", "--proxy-headers", "--forwarded-allow-ips", "*"]
+          # --forwarded-allow-ips comes from FORWARDED_ALLOW_IPS in finops-config, which
+          # uvicorn reads itself. Passing "*" here trusted any peer's X-Forwarded-For,
+          # letting a caller forge the client IP used for throttling and auditing.
+          args: ["--workers", "4", "--proxy-headers"]
           ports:
             - { name: http, containerPort: 8000 }
           envFrom:
@@ -86,6 +89,11 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        # Scratch space only. Artifacts belong in the object store; this volume exists so
+        # the read-only root filesystem has somewhere to write, and anything left here is
+        # lost on restart and invisible to the other replicas. Readiness fails outside
+        # local/dev when the store has fallen back to it, so a missing MinIO shows up as a
+        # failed rollout instead of silent data loss.
         - name: artifacts
           emptyDir: {}
       terminationGracePeriodSeconds: 45

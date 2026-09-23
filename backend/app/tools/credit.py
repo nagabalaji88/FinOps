@@ -389,7 +389,9 @@ async def pull_credit_bureau(args: BureauArgs, ctx: ToolContext) -> dict[str, An
     }
 
 
-async def _verified_monthly_income(ctx: ToolContext, customer: Customer) -> tuple[float | None, dict[str, Any]]:
+async def _verified_monthly_income(
+    ctx: ToolContext, customer: Customer
+) -> tuple[float | None, dict[str, Any]]:
     """Monthly income evidenced by salary credits, and how it was established.
 
     Returns `None` when the ledger cannot evidence an income, so the caller can decide

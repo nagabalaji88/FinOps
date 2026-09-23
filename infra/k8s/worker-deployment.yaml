@@ -18,7 +18,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: worker
-          image: ghcr.io/finops/agent-api:1.0.0
+          image: ghcr.io/nagabalaji88/agent-api:1.0.0
           command: ["celery"]
           args: ["-A", "app.workers.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency=4"]
           envFrom:
@@ -51,7 +51,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 10001 }
       containers:
         - name: beat
-          image: ghcr.io/finops/agent-api:1.0.0
+          image: ghcr.io/nagabalaji88/agent-api:1.0.0
           command: ["celery"]
           args: ["-A", "app.workers.celery_app.celery_app", "beat", "--loglevel=info"]
           envFrom:
@@ -77,7 +77,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: retention
-              image: ghcr.io/finops/agent-api:1.0.0
+              image: ghcr.io/nagabalaji88/agent-api:1.0.0
               command: ["python", "-m", "app.cli", "retention", "--apply"]
               envFrom:
                 - configMapRef: { name: finops-config }

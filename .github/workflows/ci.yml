@@ -3,6 +3,11 @@ name: CI
 on:
   push:
     branches: [main, "claude/**"]
+    # The images job derives a bare semver tag (1.2.3) with docker/metadata-action's
+    # `type=semver` rule, which only fires for a tag ref. Without this the deployment
+    # manifests' appVersion tag is never built and a release pulls an image that
+    # does not exist.
+    tags: ["v*.*.*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -211,10 +216,30 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: v3.16.3
+      - name: Resolve chart dependencies
+        # Chart.yaml declares postgresql and redis but the repository carries no charts/
+        # directory or Chart.lock, and Helm refuses to load a chart whose declared
+        # dependencies are absent -- whatever their `condition` evaluates to. Both the
+        # lint and the render below failed on that before this step existed.
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm dependency update infra/helm/finops
       - name: Lint chart
         run: helm lint infra/helm/finops --set externalSecrets.enabled=false
       - name: Render templates
         run: helm template finops infra/helm/finops --set externalSecrets.enabled=false > /dev/null
+      - name: Reject placeholder images and wildcard host trust in the rendered output
+        # The chart used to default to an image namespace CI never publishes to and to a
+        # wildcard forwarded-IP trust. Both render cleanly, so only an assertion catches them.
+        run: |
+          rendered=$(helm template finops infra/helm/finops --set externalSecrets.enabled=false)
+          if grep -q "ghcr.io/finops/" <<<"$rendered"; then
+            echo "Chart references ghcr.io/finops/*, which no workflow publishes"; exit 1
+          fi
+          if grep -q -- "--forwarded-allow-ips" <<<"$rendered"; then
+            echo "Chart passes --forwarded-allow-ips; set FORWARDED_ALLOW_IPS instead"; exit 1
+          fi
+          grep -q "TRUSTED_HOSTS" <<<"$rendered" || { echo "TRUSTED_HOSTS missing"; exit 1; }
       - uses: azure/setup-kubectl@v4
       - name: Validate raw manifests
         run: |
@@ -257,9 +282,12 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"arguments":{"days":90,"persist_alerts":false}}' \
             http://127.0.0.1:8000/api/v1/tools/monitor_transactions/invoke > /dev/null
+          # Every implemented agent carries four behavioural scenarios plus a best, an
+          # average and a worst input, so the catalogue grows with the agent count. Assert
+          # the invariant rather than a number that goes stale on the next agent.
           curl -fsS -H "Authorization: Bearer $TOKEN" \
             http://127.0.0.1:8000/api/v1/validation/scenarios \
-            | python -c 'import sys,json; d=json.load(sys.stdin); assert d["total"]==32, d["total"]'
+            | python -c 'import sys,json; d=json.load(sys.stdin); assert d["total"] % 7 == 0 and d["total"] >= 56, d["total"]'
           echo "smoke suite passed"
 
       - name: Conformance suite (self-preparing; BLOCKED without a provider key)

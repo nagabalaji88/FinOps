@@ -22,7 +22,7 @@ spec:
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: worker
-          image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}"
+          image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag | default .Chart.AppVersion }}"
           command: ["celery"]
           args: ["-A", "app.workers.celery_app.celery_app", "worker", "--loglevel=info", "--concurrency={{ .Values.worker.concurrency }}"]
           envFrom: {{- include "finops.envFrom" . | nindent 12 }}
@@ -57,7 +57,7 @@ spec:
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: beat
-          image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}"
+          image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag | default .Chart.AppVersion }}"
           command: ["celery"]
           args: ["-A", "app.workers.celery_app.celery_app", "beat", "--loglevel=info"]
           envFrom: {{- include "finops.envFrom" . | nindent 12 }}

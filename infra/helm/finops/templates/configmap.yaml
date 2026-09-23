@@ -17,6 +17,11 @@ data:
   DATA_RETENTION_DAYS: {{ .Values.config.dataRetentionDays | quote }}
   RATE_LIMIT_PER_MINUTE: {{ .Values.config.rateLimitPerMinute | quote }}
   CORS_ORIGINS: {{ .Values.config.corsOrigins | quote }}
+  TRUSTED_HOSTS: {{ include "finops.trustedHosts" . | quote }}
+  FORWARDED_ALLOW_IPS: {{ .Values.config.forwardedAllowIps | quote }}
+  EXPOSE_API_DOCS: {{ .Values.config.exposeApiDocs | quote }}
+  EXPOSE_METRICS_ENDPOINT: {{ .Values.config.exposeMetricsEndpoint | quote }}
+  SEED_DEMO_USERS: {{ .Values.migration.seedDemoUsers | quote }}
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.config.otelEndpoint | quote }}
   {{- if .Values.redis.enabled }}
   REDIS_URL: redis://{{ .Release.Name }}-redis-master:6379/0

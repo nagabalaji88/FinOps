@@ -1218,7 +1218,9 @@ BAND_SCENARIOS: list[Scenario] = [
             "down by business line?"
         },
         expect=Expectation(
-            must_match=(r"not (have|hold|find|available|covered)|no (document|information|record)|cannot|unable|do not",),
+            must_match=(
+                r"not (have|hold|find|available|covered)|no (document|information|record)|cannot|unable|do not",
+            ),
             must_not_match=(r"\b\d+(\.\d+)?\s?%\s?(net interest margin|NIM)\b",),
             min_response_chars=80,
             max_cost_usd=2.0,
@@ -1353,8 +1355,7 @@ BAND_SCENARIOS: list[Scenario] = [
         "380,202, dispute_open=true; check_contact_eligibility blocks on "
         "'dispute_open' for call, sms and visit at any hour.",
         payload={
-            "query": "This case is two months down. What contact can we make and what should "
-            "we propose?",
+            "query": "This case is two months down. What contact can we make and what should we propose?",
             "case": "COL-100003",
         },
         expect=Expectation(

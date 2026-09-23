@@ -20,7 +20,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 101 }
       containers:
         - name: web
-          image: ghcr.io/finops/agent-execute:1.0.0
+          image: ghcr.io/nagabalaji88/agent-execute:1.0.0
           ports: [{ name: http, containerPort: 8080 }]
           resources:
             requests: { cpu: 50m, memory: 96Mi }
@@ -63,7 +63,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 101 }
       containers:
         - name: web
-          image: ghcr.io/finops/agent-console:1.0.0
+          image: ghcr.io/nagabalaji88/agent-console:1.0.0
           ports: [{ name: http, containerPort: 8080 }]
           resources:
             requests: { cpu: 50m, memory: 96Mi }

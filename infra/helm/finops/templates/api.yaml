@@ -31,7 +31,7 @@ spec:
       {{- if .Values.migration.enabled }}
       initContainers:
         - name: migrate
-          image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}"
+          image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag | default .Chart.AppVersion }}"
           command: ["sh", "-c"]
           args:
             - >-
@@ -43,9 +43,11 @@ spec:
       {{- end }}
       containers:
         - name: api
-          image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}"
+          image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.api.pullPolicy }}
-          args: ["--workers", "{{ .Values.api.workers }}", "--proxy-headers", "--forwarded-allow-ips", "*"]
+          # --forwarded-allow-ips comes from FORWARDED_ALLOW_IPS in the ConfigMap, which
+          # uvicorn reads itself. Passing "*" here trusted any peer's X-Forwarded-For.
+          args: ["--workers", "{{ .Values.api.workers }}", "--proxy-headers"]
           ports: [{ name: http, containerPort: 8000 }]
           envFrom: {{- include "finops.envFrom" . | nindent 12 }}
           resources: {{- toYaml .Values.api.resources | nindent 12 }}
@@ -65,6 +67,9 @@ spec:
             - { name: artifacts, mountPath: /srv/var/artifacts }
       volumes:
         - { name: tmp, emptyDir: {} }
+        # Scratch space only: artifacts belong in the object store. Anything written here
+        # is lost on restart and invisible to the other replicas, so readiness fails
+        # outside local/dev when the store has fallen back to it.
         - { name: artifacts, emptyDir: {} }
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}

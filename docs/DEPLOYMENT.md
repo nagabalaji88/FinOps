@@ -50,13 +50,35 @@ helm dependency update infra/helm/finops
 
 helm upgrade --install finops infra/helm/finops \
   --namespace finops --create-namespace \
-  --set image.api.tag=1.0.0 \
-  --set image.web.tag=1.0.0 \
-  --set ingress.host=finops.yourbank.example \
+  --set web.execute.host=execute.yourbank.example \
+  --set web.console.host=console.yourbank.example \
   --set config.corsOrigins=https://execute.yourbank.example\,https://console.yourbank.example \
+  --set config.forwardedAllowIps=10.0.0.0/8 \
   --set externalSecrets.vaultPathPrefix=finops \
   --wait --timeout 10m
 ```
+
+Each front end is its own image, host and Deployment, so the hosts are set per
+application under `web.execute` / `web.console` — there is no `ingress.host` or
+`image.web.tag`, and Helm accepts unknown `--set` keys silently, leaving the placeholder
+hosts in place. `TRUSTED_HOSTS` is derived from those two values; override
+`config.trustedHosts` only when the API answers to a name neither front end uses.
+
+Image tags default to the chart's `appVersion`, which `.github/workflows/ci.yml` builds
+from a `v*.*.*` tag push. To deploy a branch or commit build instead, pin the tag that
+workflow published:
+
+```bash
+  --set image.api.tag=sha-a1b2c3d \
+  --set web.execute.image.tag=sha-a1b2c3d \
+  --set web.console.image.tag=sha-a1b2c3d
+```
+
+Before the first production install, put `JWT_SECRET`, `SECRET_ENCRYPTION_KEY` (distinct
+from the signing key) and `BOOTSTRAP_ADMIN_PASSWORD` in Vault under
+`<vaultPathPrefix>/runtime`. The API refuses to start in production while any of them is
+absent or still at its shipped default, and it will not seed the shared-password demo
+identities — `migration.seedDemoUsers` must stay `false`.
 
 Secrets come from Vault through the External Secrets Operator. Store them once:
 
