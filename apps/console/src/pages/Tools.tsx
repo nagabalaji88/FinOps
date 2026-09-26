@@ -3,6 +3,17 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { PlayIcon } from '@heroicons/react/24/outline'
 import { api, type ToolDefinition, Badge, Button, Card, EmptyState, ErrorState, JsonView, Meter, Modal, PageHeader, SkeletonCard, useAuth, useToasts, cn, formatDuration, formatNumber, formatPercent, relativeTime } from '@finops/shared'
 
+/**
+ * Whether the server will refuse to run this tool outside an approval workflow.
+ *
+ * The gate is `requires_human_review`, which also covers tools that write to a system of
+ * record without carrying `requires_approval`. Reading the narrower flag showed an Invoke
+ * button for those and then surfaced a 422 when it was pressed.
+ */
+function isGated(tool: ToolDefinition): boolean {
+  return tool.requires_human_review ?? tool.requires_approval
+}
+
 export default function Tools() {
   const { can } = useAuth()
   const push = useToasts((state) => state.push)
@@ -98,7 +109,7 @@ export default function Tools() {
 
                 <div className="mt-3 flex flex-wrap gap-1.5 px-5">
                   <span className="chip">{tool.category}</span>
-                  {tool.requires_approval ? <span className="chip">approval</span> : null}
+                  {isGated(tool) ? <span className="chip">approval</span> : null}
                   {tool.writes_data ? <span className="chip">writes</span> : null}
                   <span className="chip">{tool.timeout_seconds}s timeout</span>
                 </div>
@@ -155,7 +166,7 @@ export default function Tools() {
                   >
                     Schema
                   </Button>
-                  {can('tool:invoke') && !tool.requires_approval ? (
+                  {can('tool:invoke') && !isGated(tool) ? (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -189,7 +200,7 @@ export default function Tools() {
               <JsonView data={testing.schema} maxHeight="max-h-56" />
             </div>
 
-            {can('tool:invoke') && !testing.requires_approval ? (
+            {can('tool:invoke') && !isGated(testing) ? (
               <>
                 <div>
                   <label htmlFor="tool-args" className="metric-label mb-1.5 block">
@@ -209,7 +220,7 @@ export default function Tools() {
                   </Button>
                 </div>
               </>
-            ) : testing.requires_approval ? (
+            ) : isGated(testing) ? (
               <p className="rounded-xl border border-state-warn/25 bg-state-warn/10 px-3 py-2 text-2xs text-state-warn">
                 This tool is gated by human approval and can only run inside an agent execution where the
                 approval workflow is enforced.

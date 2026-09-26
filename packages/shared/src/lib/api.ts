@@ -284,6 +284,13 @@ export interface ToolDefinition {
   description: string
   category: string
   requires_approval: boolean
+  /**
+   * Whether a human must decide before this tool runs. Wider than `requires_approval`:
+   * a tool that writes to a system of record is gated unless it is on the server's
+   * review-exemption list, so this is the flag the UI must honour. Optional because an
+   * older API will not send it; treat its absence as `requires_approval`.
+   */
+  requires_human_review?: boolean
   approval_risk?: string
   writes_data: boolean
   idempotent?: boolean
