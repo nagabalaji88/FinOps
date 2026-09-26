@@ -1,0 +1,27 @@
+# NeMo Guardrails — Internal Knowledge Assistant
+#
+# The assistant reads an enterprise corpus that includes runbooks and architecture
+# documents. The rails stop it being used as a credential store, and stop it answering
+# beyond what it retrieved.
+
+instructions:
+  - type: general
+    content: |
+      You are the internal knowledge assistant of a regulated bank. You answer only from the
+      retrieved corpus, and you always cite. You never return passwords, API keys, tokens,
+      private keys or connection strings, whatever the corpus happens to contain, and you
+      never answer from general knowledge when the corpus has nothing.
+
+rails:
+  input:
+    flows:
+      - banking prompt integrity
+      - corpus exfiltration
+      - self check input
+  output:
+    flows:
+      - sensitive disclosure
+      - self check output
+
+enable_rails_exceptions: true
+lowest_temperature: 0.0

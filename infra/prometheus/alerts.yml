@@ -1,0 +1,66 @@
+groups:
+  - name: finops-agents
+    interval: 30s
+    rules:
+      - alert: AgentErrorRateHigh
+        expr: |
+          sum(rate(finops_agent_executions_total{status=~"failed|timeout"}[10m])) by (agent)
+            / clamp_min(sum(rate(finops_agent_executions_total[10m])) by (agent), 0.001) > 0.25
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Agent {{ $labels.agent }} error rate above 25%"
+          runbook: "See docs/OPERATIONS.md#agent-incidents"
+
+      - alert: AgentLatencySlo
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(finops_agent_execution_duration_seconds_bucket[10m])) by (le, agent)) > 120
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Agent {{ $labels.agent }} p95 latency above 120s"
+
+      - alert: LlmProviderErrors
+        expr: sum(rate(finops_llm_errors_total[5m])) by (provider) > 0.2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "LLM provider {{ $labels.provider }} is returning errors"
+
+      - alert: CircuitBreakerOpen
+        expr: finops_circuit_state > 1
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Circuit {{ $labels.name }} is open"
+
+      - alert: DailyBudgetBurn
+        expr: sum(increase(finops_llm_cost_usd_total[24h])) > 500
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "LLM spend exceeded the daily budget"
+
+      - alert: QueueBacklog
+        expr: finops_queue_depth > 50
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Execution queue depth above 50"
+
+      - alert: ApiErrorRate
+        expr: |
+          sum(rate(finops_http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(finops_http_requests_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "API 5xx rate above 5%"
+
+      - alert: ApiDown
+        expr: up{job="finops-api"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "FinOps API is not scrapeable"

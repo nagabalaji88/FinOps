@@ -1,0 +1,330 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    # The images job derives a bare semver tag (1.2.3) with docker/metadata-action's
+    # `type=semver` rule, which only fires for a tag ref. Without this the deployment
+    # manifests' appVersion tag is never built and a release pulls an image that
+    # does not exist.
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Must stay inside the `requires-python = ">=3.11,<3.14"` range in backend/pyproject.toml.
+  # The upper bound is NeMo Guardrails; see the comment there before bumping this.
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "22"
+
+jobs:
+  backend-lint:
+    name: Backend lint & types
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install ".[dev]"
+      - name: Ruff
+        run: ruff check app tests
+      - name: Ruff format check
+        run: ruff format --check app tests
+      - name: Mypy
+        run: mypy app --ignore-missing-imports --no-strict-optional
+
+  backend-test:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: finops
+          POSTGRES_PASSWORD: finops
+          POSTGRES_DB: finops_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U finops"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install ".[dev]"
+      - name: Unit and integration tests
+        run: pytest -q --cov=app --cov-report=xml --cov-report=term-missing
+      - name: Verify migrations apply to PostgreSQL
+        env:
+          DATABASE_URL: postgresql+asyncpg://finops:finops@localhost:5432/finops_test
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+      - name: Verify no model is missing from a migration
+        # The suite creates its schema with create_all, so a model added without a
+        # migration passes every test and only breaks on a real deployment. `alembic check`
+        # diffs the models against the migration chain and fails when they disagree.
+        env:
+          DATABASE_URL: postgresql+asyncpg://finops:finops@localhost:5432/finops_test
+        run: alembic check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+
+  frontend:
+    name: Frontend build & tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Type check (shared, execute, console)
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm run test
+      - name: Build both applications
+        run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: execute-dist
+          path: apps/execute/dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: console-dist
+          path: apps/console/dist
+
+  security:
+    name: Security scanning
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem scan
+        # `aquasecurity/trivy-action@0.28.0` no longer resolves -- the tag was removed
+        # upstream, so this job died in "Set up job" without scanning anything, which is
+        # why the security gate has been reporting nothing rather than reporting clean.
+        # Running Aqua's published image directly removes the dependency on a marketplace
+        # tag that can vanish, and keeps third-party action code out of the runner's
+        # credentialed context. Pin this to a digest once one can be resolved.
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -v /tmp/trivy-cache:/root/.cache/trivy \
+            aquasec/trivy:latest fs /workspace \
+              --scanners vuln,secret,misconfig \
+              --format sarif --output /workspace/trivy.sarif \
+              --severity CRITICAL,HIGH --ignore-unfixed --no-progress
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy.sarif
+      - name: Python dependency audit
+        # Audited inside a throwaway virtualenv, not the runner's system Python. Installing
+        # into the system interpreter meant `--strict` also audited whatever the runner
+        # image ships, and it failed on `bcc` -- an OS package that is not on PyPI and has
+        # nothing to do with this project. The venv confines the audit to our own tree.
+        run: |
+          python -m venv /tmp/audit-venv
+          /tmp/audit-venv/bin/pip install --quiet --upgrade pip setuptools wheel pip-audit
+          /tmp/audit-venv/bin/pip install --quiet ./backend
+          # Audit the resolved dependency closure, not the environment. Under `--strict`,
+          # pip-audit fails on anything it cannot look up on PyPI, and an environment
+          # contains two such things: the runner image's OS packages (`bcc`) and this
+          # project itself. Freezing to a requirements file drops both and leaves exactly
+          # the third-party tree we ship.
+          /tmp/audit-venv/bin/pip freeze --exclude-editable \
+            | grep -v '^finops-command-center' > /tmp/audit-requirements.txt
+          # PYSEC-2026-1325 (ecdsa, Minerva timing attack on P-256) has no upstream fix.
+          # `ecdsa` is present only as python-jose's pure-Python fallback backend: this
+          # platform signs with HS256 through the `cryptography` backend and no code path
+          # reaches it. Reviewed 2026-08-09; drop this once python-jose releases without it.
+          /tmp/audit-venv/bin/pip-audit --strict --desc \
+            --ignore-vuln PYSEC-2026-1325 -r /tmp/audit-requirements.txt
+
+  images:
+    name: Build container images
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend]
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - context: backend
+            dockerfile: backend/Dockerfile
+            image: agent-api
+          - context: .
+            dockerfile: apps/execute/Dockerfile
+            image: agent-execute
+          - context: .
+            dockerfile: apps/console/Dockerfile
+            image: agent-console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=short
+            type=semver,pattern={{version}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+
+  helm:
+    name: Helm chart validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+      - name: Resolve chart dependencies
+        # Chart.yaml declares postgresql and redis but the repository carries no charts/
+        # directory or Chart.lock, and Helm refuses to load a chart whose declared
+        # dependencies are absent -- whatever their `condition` evaluates to. Both the
+        # lint and the render below failed on that before this step existed.
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm dependency update infra/helm/finops
+      - name: Lint chart
+        run: helm lint infra/helm/finops --set externalSecrets.enabled=false
+      - name: Render templates
+        run: helm template finops infra/helm/finops --set externalSecrets.enabled=false > /dev/null
+      - name: Reject placeholder images and wildcard host trust in the rendered output
+        # The chart used to default to an image namespace CI never publishes to and to a
+        # wildcard forwarded-IP trust. Both render cleanly, so only an assertion catches them.
+        run: |
+          # Strip comments first: helm passes them through to the rendered output, and the
+          # template comment explaining why --forwarded-allow-ips is absent was itself
+          # matching the check for it.
+          rendered=$(helm template finops infra/helm/finops --set externalSecrets.enabled=false \
+            | grep -v '^[[:space:]]*#')
+          if grep -q "ghcr.io/finops/" <<<"$rendered"; then
+            echo "Chart references ghcr.io/finops/*, which no workflow publishes"; exit 1
+          fi
+          if grep -q -- "--forwarded-allow-ips" <<<"$rendered"; then
+            echo "Chart passes --forwarded-allow-ips; set FORWARDED_ALLOW_IPS instead"; exit 1
+          fi
+          grep -q "TRUSTED_HOSTS" <<<"$rendered" || { echo "TRUSTED_HOSTS missing"; exit 1; }
+      - name: Validate raw manifests
+        # `kubectl apply --dry-run=client` still performs API discovery to map a kind onto a
+        # resource, so it needs a reachable cluster and failed with "connection refused"
+        # against the CI runner -- meaning this gate has never actually validated anything.
+        # kubeconform checks the manifests against published schemas entirely offline;
+        # -ignore-missing-schemas lets the ExternalSecret CRD past rather than failing on a
+        # kind it has no schema for.
+        run: |
+          docker run --rm -v "$PWD/infra/k8s:/manifests" ghcr.io/yannh/kubeconform:latest \
+            -strict -summary -ignore-missing-schemas /manifests
+
+  e2e:
+    name: End-to-end smoke
+    runs-on: ubuntu-latest
+    needs: [backend-test]
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install ".[dev]"
+      - name: Boot the API and exercise the platform
+        run: |
+          python -m app.cli init-db
+          python -m app.cli seed-banking --customers 6
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          for _ in $(seq 30); do
+            curl -fsS http://127.0.0.1:8000/health/live && break
+            sleep 2
+          done
+          TOKEN=$(curl -fsS -X POST http://127.0.0.1:8000/api/v1/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@finops.local","password":"ChangeMe!2026"}' \
+            | python -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+          for path in dashboard/overview dashboard/geography agents tools services costs/summary approvals; do
+            curl -fsS -H "Authorization: Bearer $TOKEN" \
+              "http://127.0.0.1:8000/api/v1/$path" > /dev/null
+          done
+          curl -fsS -H "Authorization: Bearer $TOKEN" -X POST \
+            -H 'Content-Type: application/json' \
+            -d '{"arguments":{"days":90,"persist_alerts":false}}' \
+            http://127.0.0.1:8000/api/v1/tools/monitor_transactions/invoke > /dev/null
+          # Every implemented agent carries four behavioural scenarios plus a best, an
+          # average and a worst input, so the catalogue grows with the agent count. Assert
+          # the invariant rather than a number that goes stale on the next agent.
+          curl -fsS -H "Authorization: Bearer $TOKEN" \
+            http://127.0.0.1:8000/api/v1/validation/scenarios \
+            | python -c 'import sys,json; d=json.load(sys.stdin); assert d["total"] % 7 == 0 and d["total"] >= 56, d["total"]'
+          echo "smoke suite passed"
+
+      - name: Conformance suite (self-preparing; BLOCKED without a provider key)
+        run: |
+          python -m app.cli validate --quiet --output conformance.md
+        env:
+          ENVIRONMENT: local
+          LOG_JSON: "false"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conformance-report
+          path: backend/conformance.md
+        env:
+          ENVIRONMENT: local
+          LOG_JSON: "false"

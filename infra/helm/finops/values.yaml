@@ -1,0 +1,177 @@
+# Default values for the FinOps AI Command Center.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Images are published by .github/workflows/ci.yml to ghcr.io/<repository owner>/<image>.
+# An empty tag resolves to the chart's appVersion, which a release tag (v1.2.3) builds
+# through the workflow's semver rule; set it explicitly to pin a branch or SHA tag instead.
+image:
+  api:
+    repository: ghcr.io/nagabalaji88/agent-api
+    tag: ""
+    pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+api:
+  replicaCount: 3
+  workers: 4
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: "2", memory: 3Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 75
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+# Two front-end applications over the same API. Each is its own image, Deployment,
+# Service and host; disable either without touching the other.
+web:
+  execute:
+    enabled: true
+    host: execute.finops.example.com
+    replicaCount: 2
+    image:
+      repository: ghcr.io/nagabalaji88/agent-execute
+      tag: ""
+      pullPolicy: IfNotPresent
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 300m, memory: 256Mi }
+  console:
+    enabled: true
+    host: console.finops.example.com
+    replicaCount: 2
+    image:
+      repository: ghcr.io/nagabalaji88/agent-console
+      tag: ""
+      pullPolicy: IfNotPresent
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { cpu: 300m, memory: 256Mi }
+
+worker:
+  enabled: true
+  replicaCount: 2
+  concurrency: 4
+  resources:
+    requests: { cpu: 300m, memory: 768Mi }
+    limits: { cpu: "2", memory: 2Gi }
+
+beat:
+  enabled: true
+
+migration:
+  enabled: true
+  seedPlatform: true
+  # Loads the sample banking environment; leave false for production.
+  seedSampleBanking: false
+  # Creates operator/approver/auditor/builder accounts that all share
+  # BOOTSTRAP_ADMIN_PASSWORD. A production API refuses to seed them; turn this on only
+  # for a demo cluster.
+  seedDemoUsers: false
+
+ingress:
+  enabled: true
+  className: nginx
+  # Hosts come from web.<app>.host above; one certificate covers both.
+  tls:
+    enabled: true
+    secretName: finops-tls
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+
+config:
+  environment: production
+  logLevel: INFO
+  defaultModel: claude-haiku-4-5
+  defaultEmbeddingModel: text-embedding-3-small
+  dailyCostBudgetUsd: "500"
+  monthlyCostBudgetUsd: "10000"
+  perExecutionCostCapUsd: "5"
+  maxConcurrentExecutions: "32"
+  executionTimeoutSeconds: "900"
+  dataRetentionDays: "400"
+  rateLimitPerMinute: "240"
+  corsOrigins: https://execute.finops.example.com,https://console.finops.example.com
+  # Host headers the API answers to. Empty falls back to the web.<app>.host values above,
+  # which is what an ingress actually sends. A production API refuses to start on "*".
+  trustedHosts: ""
+  # Peers whose X-Forwarded-For the API believes. Point this at the ingress controller's
+  # pod CIDR; "*" lets any caller forge the client IP that throttling and auditing use.
+  forwardedAllowIps: 10.0.0.0/8
+  # The OpenAPI schema enumerates every route for an unauthenticated caller, and nothing
+  # in the cluster consumes it, so it stays off. The ingress routes only /api, /health and
+  # / (the web app), so neither path is reachable from outside regardless.
+  exposeApiDocs: "false"
+  # Left on because the ServiceMonitor below scrapes /metrics on the pod directly. It is
+  # not routed by the ingress; the NetworkPolicy is what keeps it to the cluster.
+  exposeMetricsEndpoint: "true"
+  otelEndpoint: http://otel-collector.observability:4318
+  qdrantUrl: http://finops-qdrant:6333
+  kafkaBootstrapServers: ""
+  elasticsearchUrl: ""
+  neo4jUri: ""
+  minioEndpoint: finops-minio:9000
+  keycloakUrl: ""
+  keycloakRealm: finops
+  vaultAddr: ""
+
+# Prefer externalSecrets in production; `secrets` is for local clusters only.
+externalSecrets:
+  enabled: true
+  storeName: vault-backend
+  storeKind: ClusterSecretStore
+  refreshInterval: 15m
+  vaultPathPrefix: finops
+
+secrets:
+  create: false
+  data: {}
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  labels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile: { type: RuntimeDefault }
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: { drop: ["ALL"] }
+
+networkPolicy:
+  enabled: true
+
+postgresql:
+  enabled: true
+  auth:
+    username: finops
+    database: finops
+    existingSecret: finops-postgresql
+  primary:
+    persistence: { size: 100Gi }
+    resources:
+      requests: { cpu: "1", memory: 2Gi }
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth: { enabled: false }
+  master:
+    persistence: { size: 8Gi }
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

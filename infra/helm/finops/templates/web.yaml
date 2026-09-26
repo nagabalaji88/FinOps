@@ -1,0 +1,108 @@
+{{- /*
+Two web applications over one API.
+
+  execute — sign in, run the board's agents, read their analytics
+  console — the rest of the platform
+
+They are separate images, Deployments and Services, and are routed by host so each keeps
+its own root path for client-side routing. Either can be scaled or disabled on its own.
+*/ -}}
+{{- range $key, $app := .Values.web }}
+{{- if $app.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "finops.fullname" $ }}-{{ $key }}
+  labels:
+    {{- include "finops.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $key }}
+spec:
+  replicas: {{ $app.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "finops.name" $ }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: {{ $key }}
+  template:
+    metadata:
+      labels:
+        {{- include "finops.labels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $key }}
+    spec:
+      containers:
+        - name: web
+          image: "{{ $app.image.repository }}:{{ $app.image.tag | default $.Chart.AppVersion }}"
+          imagePullPolicy: {{ $app.image.pullPolicy | default "IfNotPresent" }}
+          ports: [{ name: http, containerPort: 8080 }]
+          resources: {{- toYaml $app.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          volumeMounts:
+            - { name: cache, mountPath: /var/cache/nginx }
+            - { name: run, mountPath: /var/run }
+      volumes:
+        - { name: cache, emptyDir: {} }
+        - { name: run, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "finops.fullname" $ }}-{{ $key }}
+  labels: {{- include "finops.labels" $ | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "finops.name" $ }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    app.kubernetes.io/component: {{ $key }}
+  ports: [{ name: http, port: 80, targetPort: http }]
+{{- end }}
+{{- end }}
+{{- if .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "finops.fullname" . }}
+  labels: {{- include "finops.labels" . | nindent 4 }}
+  annotations: {{- toYaml .Values.ingress.annotations | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        {{- range $key, $app := .Values.web }}
+        {{- if $app.enabled }}
+        - {{ $app.host | quote }}
+        {{- end }}
+        {{- end }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    {{- range $key, $app := .Values.web }}
+    {{- if $app.enabled }}
+    - host: {{ $app.host | quote }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "finops.fullname" $ }}-api
+                port: { number: 8000 }
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "finops.fullname" $ }}-api
+                port: { number: 8000 }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "finops.fullname" $ }}-{{ $key }}
+                port: { number: 80 }
+    {{- end }}
+    {{- end }}
+{{- end }}
