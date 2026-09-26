@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 from sqlalchemy import func, select
 
+from app.core.errors import ProviderNotConfiguredError
 from app.core.logging import get_logger
 from app.db.models.agents import Agent, Approval, Execution, ExecutionEvent, Span
 from app.db.models.banking import Customer
@@ -315,6 +316,16 @@ class ValidationRunner:
         log.info("scenario_started", scenario=scenario.id, agent=scenario.agent_key)
         try:
             execution_id = await self._submit(scenario)
+        except ProviderNotConfiguredError as exc:
+            # Inconclusive, not a failure: the agent was never given a model, so nothing was
+            # learned about it either way. Preflight already warns that a deployment without
+            # a provider reports every scenario BLOCKED -- this is what makes that true.
+            return ScenarioResult(
+                scenario=scenario,
+                verdict="blocked",
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                note=f"no provider configured: {exc}",
+            )
         except Exception as exc:
             return ScenarioResult(
                 scenario=scenario,

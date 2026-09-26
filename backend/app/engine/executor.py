@@ -15,7 +15,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.bus import AGENT_CHANNEL, bus
 from app.core.config import settings
-from app.core.errors import AppError, NotFoundError, ValidationError
+from app.core.errors import AppError, NotFoundError, ProviderNotConfiguredError, ValidationError
 from app.core.logging import execution_id_ctx, get_logger, trace_id_ctx
 from app.core.metrics import (
     active_executions,
@@ -88,7 +88,11 @@ class ExecutionEngine:
 
         readiness = model_router.readiness()
         if not readiness["configured"]:
-            raise ValidationError(
+            # 503 provider_not_configured, not 422: the request is well formed and the
+            # caller can do nothing about it. This is the contract the API description
+            # advertises, and it is what lets the conformance runner tell "this deployment
+            # has no model" apart from "this agent got the answer wrong".
+            raise ProviderNotConfiguredError(
                 "No LLM provider is configured, so this agent cannot run",
                 details={
                     "set_one_of": readiness["set_one_of"],

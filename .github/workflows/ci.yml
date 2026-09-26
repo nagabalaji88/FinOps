@@ -136,14 +136,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          format: sarif
-          output: trivy.sarif
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
+        # `aquasecurity/trivy-action@0.28.0` no longer resolves -- the tag was removed
+        # upstream, so this job died in "Set up job" without scanning anything, which is
+        # why the security gate has been reporting nothing rather than reporting clean.
+        # Running Aqua's published image directly removes the dependency on a marketplace
+        # tag that can vanish, and keeps third-party action code out of the runner's
+        # credentialed context. Pin this to a digest once one can be resolved.
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -v /tmp/trivy-cache:/root/.cache/trivy \
+            aquasec/trivy:latest fs /workspace \
+              --scanners vuln,secret,misconfig \
+              --format sarif --output /workspace/trivy.sarif \
+              --severity CRITICAL,HIGH --ignore-unfixed --no-progress
       - uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
@@ -232,7 +238,11 @@ jobs:
         # The chart used to default to an image namespace CI never publishes to and to a
         # wildcard forwarded-IP trust. Both render cleanly, so only an assertion catches them.
         run: |
-          rendered=$(helm template finops infra/helm/finops --set externalSecrets.enabled=false)
+          # Strip comments first: helm passes them through to the rendered output, and the
+          # template comment explaining why --forwarded-allow-ips is absent was itself
+          # matching the check for it.
+          rendered=$(helm template finops infra/helm/finops --set externalSecrets.enabled=false \
+            | grep -v '^[[:space:]]*#')
           if grep -q "ghcr.io/finops/" <<<"$rendered"; then
             echo "Chart references ghcr.io/finops/*, which no workflow publishes"; exit 1
           fi

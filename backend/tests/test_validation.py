@@ -271,6 +271,25 @@ class TestRunnerEndToEnd:
         assert report["reviewer_present"] is True
         assert report["sample_banking_customers"] > 0
 
+    async def test_a_deployment_with_no_model_blocks_rather_than_errors(self, monkeypatch):
+        """No provider is inconclusive, not a failed agent.
+
+        Preflight already warns that such a deployment reports every scenario BLOCKED, but
+        the submit refusal was classified as an error, which made `report.ok` false and
+        turned "this environment has no key" into a red pipeline indistinguishable from a
+        genuinely broken agent.
+        """
+        from app.llm.router import router as model_router
+
+        monkeypatch.setattr(
+            model_router, "readiness", lambda: {"configured": False, "set_one_of": ["OPENAI_API_KEY"]}
+        )
+
+        result = await ValidationRunner().run_scenario(by_id("KA-01"))
+
+        assert result.verdict == "blocked", result.note
+        assert "no provider configured" in (result.note or "")
+
     async def test_knowledge_scenario_passes_against_a_correct_answer(self, _register_scripted_model):
         provider = _register_scripted_model
         provider.queue_text(
