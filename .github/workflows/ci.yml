@@ -155,17 +155,27 @@ jobs:
         with:
           sarif_file: trivy.sarif
       - name: Python dependency audit
-        # The previous form fed a JSON install report to `-r`, which expects a requirements
-        # file, and then swallowed the result twice over. This installs the dependency set
-        # the image actually ships and fails the build on an advisory.
+        # Audited inside a throwaway virtualenv, not the runner's system Python. Installing
+        # into the system interpreter meant `--strict` also audited whatever the runner
+        # image ships, and it failed on `bcc` -- an OS package that is not on PyPI and has
+        # nothing to do with this project. The venv confines the audit to our own tree.
         run: |
-          python -m pip install --upgrade pip setuptools wheel pip-audit
-          pip install ./backend
+          python -m venv /tmp/audit-venv
+          /tmp/audit-venv/bin/pip install --quiet --upgrade pip setuptools wheel pip-audit
+          /tmp/audit-venv/bin/pip install --quiet ./backend
+          # Audit the resolved dependency closure, not the environment. Under `--strict`,
+          # pip-audit fails on anything it cannot look up on PyPI, and an environment
+          # contains two such things: the runner image's OS packages (`bcc`) and this
+          # project itself. Freezing to a requirements file drops both and leaves exactly
+          # the third-party tree we ship.
+          /tmp/audit-venv/bin/pip freeze --exclude-editable \
+            | grep -v '^finops-command-center' > /tmp/audit-requirements.txt
           # PYSEC-2026-1325 (ecdsa, Minerva timing attack on P-256) has no upstream fix.
           # `ecdsa` is present only as python-jose's pure-Python fallback backend: this
           # platform signs with HS256 through the `cryptography` backend and no code path
           # reaches it. Reviewed 2026-08-09; drop this once python-jose releases without it.
-          pip-audit --strict --desc --ignore-vuln PYSEC-2026-1325
+          /tmp/audit-venv/bin/pip-audit --strict --desc \
+            --ignore-vuln PYSEC-2026-1325 -r /tmp/audit-requirements.txt
 
   images:
     name: Build container images
@@ -250,12 +260,16 @@ jobs:
             echo "Chart passes --forwarded-allow-ips; set FORWARDED_ALLOW_IPS instead"; exit 1
           fi
           grep -q "TRUSTED_HOSTS" <<<"$rendered" || { echo "TRUSTED_HOSTS missing"; exit 1; }
-      - uses: azure/setup-kubectl@v4
       - name: Validate raw manifests
+        # `kubectl apply --dry-run=client` still performs API discovery to map a kind onto a
+        # resource, so it needs a reachable cluster and failed with "connection refused"
+        # against the CI runner -- meaning this gate has never actually validated anything.
+        # kubeconform checks the manifests against published schemas entirely offline;
+        # -ignore-missing-schemas lets the ExternalSecret CRD past rather than failing on a
+        # kind it has no schema for.
         run: |
-          for file in infra/k8s/*.yaml; do
-            kubectl apply --dry-run=client --validate=false -f "$file" > /dev/null || exit 1
-          done
+          docker run --rm -v "$PWD/infra/k8s:/manifests" ghcr.io/yannh/kubeconform:latest \
+            -strict -summary -ignore-missing-schemas /manifests
 
   e2e:
     name: End-to-end smoke
