@@ -4,6 +4,9 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+# setuptools' build directory: a partial, stale duplicate of backend/app that every
+# `pip install` rewrites. It is regenerated on demand and must not be version controlled.
+backend/build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
