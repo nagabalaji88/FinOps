@@ -93,9 +93,20 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # a fresh database has no settings table yet
         log.warning("runtime_config_unavailable", error=str(exc))
 
+    # Third-party tools are adopted after the built-ins, so a server cannot win a name
+    # race, and the summary is kept for the readiness endpoint to report. Failure to reach
+    # someone else's server is not a reason to refuse our own traffic.
+    mcp_summary: dict[str, Any] = {"servers": [], "tools_registered": 0}
+    if settings.mcp_enabled:
+        from app.mcp import register_mcp_tools
+
+        mcp_summary = await register_mcp_tools()
+    app.state.mcp = mcp_summary
+
     log.info(
         "startup_complete",
         environment=settings.environment,
+        mcp_tools=mcp_summary["tools_registered"],
         providers=model_router.configured_providers(),
         model=runtime_config.default_model or "router-selected",
         cache=cache.backend,
@@ -103,6 +114,10 @@ async def lifespan(app: FastAPI):
         secrets=secret_manager.backend,
     )
     yield
+    if settings.mcp_enabled:
+        from app.mcp import close_mcp_clients
+
+        await close_mcp_clients()
     await bus.close()
     await cache.close()
     await close_http_client()
@@ -113,7 +128,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     description=DESCRIPTION,
-    version="1.0.0",
+    version=settings.app_version,
     # The OpenAPI schema enumerates every route, payload shape and error for a caller who
     # has not authenticated. Off in production unless a deployment opts back in.
     docs_url="/docs" if settings.api_docs_enabled else None,
@@ -219,7 +234,7 @@ async def liveness() -> dict[str, Any]:
 
 
 @app.get("/health/ready", tags=["health"])
-async def readiness() -> Response:
+async def readiness(request: Request) -> Response:
     database_ok = await ping_database()
     providers = model_router.configured_providers()
     # The container mounts an emptyDir, so a filesystem artifact store loses every artifact
@@ -235,6 +250,20 @@ async def readiness() -> Response:
         "llm_providers": providers or "none_configured",
     }
     warnings = []
+
+    # A configured MCP server that could not be reached is reported, not fatal: its tools
+    # are simply absent from the catalogue, and an agent that needed one fails with an
+    # unknown-tool result rather than the whole deployment failing its probe.
+    mcp = getattr(request.app.state, "mcp", None)
+    if settings.mcp_enabled and isinstance(mcp, dict):
+        unreachable = [s["server"] for s in mcp.get("servers", []) if s.get("error")]
+        checks["mcp"] = f"{mcp.get('tools_registered', 0)} external tools"
+        if unreachable:
+            warnings.append(
+                "MCP server(s) could not be reached, so their tools are not in the "
+                f"catalogue: {', '.join(unreachable)}"
+            )
+
     if not providers:
         warnings.append(
             "No LLM provider configured - agent executions will fail with "

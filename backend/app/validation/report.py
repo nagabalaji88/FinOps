@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from app.compliance.fairness import UNMEASURABLE_ATTRIBUTES
 from app.validation.runner import ScenarioResult, ValidationReport
 
 VERDICT_MARK = {"passed": "PASS", "failed": "FAIL", "blocked": "BLOCKED", "error": "ERROR"}
@@ -63,6 +64,61 @@ def _scenario_section(result: ScenarioResult) -> list[str]:
     return lines
 
 
+FAIRNESS_STATUS = {
+    "review": "**REVIEW**",
+    "no_disparity_detected": "no disparity detected",
+    "inconclusive": "inconclusive",
+}
+
+
+def _fairness_section(report: ValidationReport) -> list[str]:
+    """Selection rates by protected group, with the attributes we cannot measure named.
+
+    Printed whether or not anything is flagged: the evidence Article 15 asks for is the
+    measurement, and a section that only appears on a bad result reads as an accusation
+    rather than as a control that runs every time.
+    """
+    if not report.fairness:
+        return []
+
+    lines = [
+        "## Fairness across protected groups",
+        "",
+        "Selection rate is the share of decisions that were approvals. The adverse impact "
+        "ratio compares each group with the most favoured comparable group; the four-fifths "
+        "convention treats a ratio below 0.80 as worth investigating. A flagged group is a "
+        "question to answer, not a finding of discrimination, and this section does not "
+        "change the conformance verdict.",
+        "",
+    ]
+    for attribute in report.fairness:
+        status = FAIRNESS_STATUS.get(str(attribute["status"]), str(attribute["status"]))
+        reference = attribute["reference_group"] or "none"
+        lines += [
+            f"### `{attribute['attribute']}` — {status}",
+            "",
+            f"Reference group: `{reference}` · minimum group size for comparison: "
+            f"{attribute['minimum_group_size']}",
+            "",
+            "| Group | Decisions | Approvals | Selection rate | Impact ratio | Comparable |",
+            "|---|---|---|---|---|---|",
+        ]
+        for row in attribute["groups"]:
+            ratio = "—" if row["adverse_impact_ratio"] is None else f"{row['adverse_impact_ratio']:.2f}"
+            if row["below_four_fifths"]:
+                ratio = f"**{ratio}**"
+            lines.append(
+                f"| `{row['group']}` | {row['decisions']} | {row['approvals']} | "
+                f"{row['selection_rate']:.2%} | {ratio} | {'yes' if row['comparable'] else 'no'} |"
+            )
+        lines.append("")
+
+    lines += ["### Attributes not measured", ""]
+    lines += [f"- `{name}` — {reason}" for name, reason in sorted(UNMEASURABLE_ATTRIBUTES.items())]
+    lines.append("")
+    return lines
+
+
 def to_markdown(report: ValidationReport) -> str:
     summary = report.to_dict()["summary"]
     lines = [
@@ -111,6 +167,8 @@ def to_markdown(report: ValidationReport) -> str:
             f"**{VERDICT_MARK[result.verdict]}** | {passed}/{len(result.checks)} |"
         )
     lines.append("")
+
+    lines += _fairness_section(report)
 
     failures = [r for r in report.results if r.verdict in {"failed", "error"}]
     if failures:
@@ -229,4 +287,8 @@ def to_console(report: ValidationReport) -> str:
         f"{summary['blocked']} blocked · {summary['errored']} errored "
         f"· ${summary['total_cost_usd']:.5f} spent",
     ]
+    for attribute in report.fairness:
+        flagged = attribute["groups_below_four_fifths"]
+        detail = f"groups below four-fifths: {', '.join(flagged)}" if flagged else attribute["status"]
+        lines.append(f"  fairness   {attribute['attribute']:<14} {detail}")
     return "\n".join(lines)

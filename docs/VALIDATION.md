@@ -217,6 +217,19 @@ additionally tested directly, with no provider needed, in
 capital function, the RBI classification ladder and the Fair Practices Code contact window
 — and the rails in `backend/tests/test_guardrails.py`.
 
+## Fairness, alongside the verdict
+
+Scenario coverage answers whether an agent reaches the right answer on a given record. It
+does not answer whether it reaches different answers for different groups, so every run also
+reports the selection rate and adverse impact ratio across the protected attributes the
+platform holds — a table per attribute in the Markdown report, a line in the console
+summary, a `fairness` key in the JSON.
+
+It is reported, not enforced: the four-fifths threshold is a screening line, a disparity can
+have a lawful explanation, and it deliberately does not move the conformance verdict. The
+methodology, and the attributes that are deliberately not measured, are in
+[`docs/COMPLIANCE.md`](COMPLIANCE.md).
+
 ## Extending the suite
 
 Add a `Scenario` to `backend/app/validation/scenarios.py`. Prefer structural assertions,

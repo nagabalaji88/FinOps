@@ -149,6 +149,38 @@ async def cmd_retention(dry_run: bool) -> None:
     print(json.dumps({"cutoff": cutoff.isoformat(), "dry_run": dry_run, "records": summary}, indent=2))
 
 
+async def cmd_annex_iv(output: str | None, fmt: str) -> int:
+    """Generate the Annex IV technical documentation from the running platform.
+
+    Exits non-zero when the generator finds a gap in what is deployed -- an agent with no
+    accountable owner, no guardrail configuration or no conformance coverage. The document
+    is still written: a pipeline should be able to publish the file and fail the build in
+    the same step, because a gap the operator cannot read is a gap nobody closes.
+    """
+    import app.tools  # noqa: F401  -- importing registers every tool with the registry
+    from app.compliance.annex_iv import collect, to_markdown
+
+    await ensure_schema()
+    async with session_scope() as session:
+        facts = await collect(session)
+
+    body = json.dumps(facts, indent=2, default=str) if fmt == "json" else to_markdown(facts)
+    if output:
+        path = pathlib.Path(output)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        print(f"Wrote {path} ({len(body)} bytes)")
+    else:
+        print(body)
+
+    gaps = facts["gaps"]
+    for gap in gaps:
+        log.warning("annex_iv_gap", annex_iv=gap["annex_iv"], gap=gap["gap"], owner=gap["owner"])
+    if gaps:
+        print(f"\n{len(gaps)} gap(s) found; see the 'Gaps found in the deployed system' section.")
+    return 1 if gaps else 0
+
+
 async def cmd_validate(
     agent: str | None,
     scenario_ids: list[str] | None,
@@ -451,6 +483,13 @@ def main() -> None:
         action="store_false",
         help="Print verdicts only, without each agent's response",
     )
+    annex = sub.add_parser(
+        "annex-iv",
+        help="Generate the EU AI Act Annex IV technical documentation from the "
+        "agent registry, tool registry, guardrail configs and conformance suite",
+    )
+    annex.add_argument("--output", default=None, help="Write the document to this path")
+    annex.add_argument("--format", dest="fmt", default="markdown", choices=["markdown", "json"])
     run = sub.add_parser("run-agent", help="Execute an agent from the command line")
     run.add_argument("agent_key")
     run.add_argument("--input", default="{}")
@@ -467,6 +506,7 @@ def main() -> None:
         "health": lambda: cmd_health(),
         "verify-provider": lambda: cmd_verify_provider(),
         "run-agent": lambda: cmd_run_agent(args.agent_key, args.input, args.user),
+        "annex-iv": lambda: cmd_annex_iv(args.output, args.fmt),
         "validate": lambda: cmd_validate(
             args.agent,
             args.scenario,

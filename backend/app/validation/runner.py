@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 from sqlalchemy import func, select
 
+from app.compliance.fairness import UNMEASURABLE_ATTRIBUTES, measure_credit_decisions
 from app.core.errors import ProviderNotConfiguredError
 from app.core.logging import get_logger
 from app.db.models.agents import Agent, Approval, Execution, ExecutionEvent, Span
@@ -101,6 +102,12 @@ class ValidationReport:
     finished_at: datetime
     results: list[ScenarioResult]
     preflight: dict[str, Any]
+    #: Selection rates across protected groups over the credit decisions on record. Not a
+    #: gate: a disparity can have a lawful explanation and this suite cannot tell. It is
+    #: reported so Article 15 evidence exists at all, and it deliberately does not move
+    #: `ok` -- a conformance verdict that silently turned amber on a sample artefact would
+    #: be worse than one that makes the operator read the number.
+    fairness: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def passed(self) -> int:
@@ -143,6 +150,10 @@ class ValidationReport:
                 "acceptable": self.ok,
             },
             "by_agent": self._by_agent(),
+            "fairness": {
+                "attributes": self.fairness,
+                "not_measurable": UNMEASURABLE_ATTRIBUTES,
+            },
             "results": [r.to_dict() for r in self.results],
         }
 
@@ -309,7 +320,18 @@ class ValidationRunner:
             finished_at=datetime.now(UTC),
             results=results,
             preflight=preflight,
+            fairness=await self._fairness(),
         )
+
+    async def _fairness(self) -> list[dict[str, Any]]:
+        """Measure the decisions on record. A measurement failure must not void the run."""
+        try:
+            async with session_scope() as session:
+                reports = await measure_credit_decisions(session)
+            return [r.to_dict() for r in reports]
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning("fairness_measurement_failed", error=str(exc))
+            return []
 
     async def run_scenario(self, scenario: Scenario) -> ScenarioResult:
         started = time.perf_counter()

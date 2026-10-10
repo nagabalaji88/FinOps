@@ -27,6 +27,11 @@ from typing import Any
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from app.compliance.adverse_action import (
+    ADVERSE_ACTION_REASONS,
+    describe,
+    unknown_reason_codes,
+)
 from app.core.errors import NotFoundError, ValidationError
 from app.db.models.banking import (
     Account,
@@ -1033,11 +1038,20 @@ class DecisionArgs(BaseModel):
 async def record_credit_decision(args: DecisionArgs, ctx: ToolContext) -> dict[str, Any]:
     if args.decision not in {"approve", "decline", "refer"}:
         raise ValidationError("decision must be approve, decline or refer")
-    application = await _application(ctx, args.application)
     if args.decision == "approve" and args.approved_amount <= 0:
         raise ValidationError("An approval must carry a sanctioned amount")
     if args.decision == "decline" and not args.reason_codes:
         raise ValidationError("A decline must carry at least one reason code")
+    # A reason the applicant is given has to come from the published vocabulary. Free text
+    # meant two declines for the same cause could be recorded differently, so neither the
+    # applicant nor a regulator could count them -- and the explanation that leaves the
+    # bank was whatever the model phrased that run.
+    if unknown := unknown_reason_codes(args.reason_codes):
+        raise ValidationError(
+            "Unknown adverse-action reason code(s)",
+            details={"unknown": unknown, "valid": sorted(ADVERSE_ACTION_REASONS)},
+        )
+    application = await _application(ctx, args.application)
 
     exposure = args.approved_amount or application.requested_amount
     expected_loss = args.probability_of_default * args.loss_given_default * exposure
@@ -1083,6 +1097,9 @@ async def record_credit_decision(args: DecisionArgs, ctx: ToolContext) -> dict[s
         "expected_loss": decision.expected_loss,
         "risk_weighted_assets": decision.risk_weighted_assets,
         "reason_codes": args.reason_codes,
+        # The applicant-facing wording, resolved here rather than left to the caller, so
+        # the explanation on the decision record is the one the vocabulary defines.
+        "adverse_action_reasons": describe(args.reason_codes),
         "conditions": args.conditions,
         "policy_version": POLICY_VERSION,
         "model_version": MODEL_VERSION,

@@ -256,6 +256,8 @@ or a rail.
 - [`docs/AGENTS.md`](docs/AGENTS.md) — agent contracts, tool catalogue, building a new agent
 - [`docs/API.md`](docs/API.md) — endpoint reference and streaming protocol
 - [`docs/VALIDATION.md`](docs/VALIDATION.md) — the 32 scenarios, assertions and the validation agent
+- [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) — EU AI Act Annex III: adverse-action reason codes, fairness measurement, and the generated Annex IV documentation
+- [`docs/MCP.md`](docs/MCP.md) — consuming third-party MCP tool servers through the same registry, gate and audit trail
 - [`docs/BANKING_CONFIGURATION.md`](docs/BANKING_CONFIGURATION.md) — sample enterprise configuration
 
 ---

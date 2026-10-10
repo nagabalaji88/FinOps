@@ -93,6 +93,13 @@ REVIEW_EXEMPT_WRITES: dict[str, str] = {
 }
 
 
+def _permits(roles: list[str], permission: str) -> bool:
+    """Whether these roles carry a permission. Imported late to keep the import graph flat."""
+    from app.core.rbac import permissions_for_roles
+
+    return permission in {str(p) for p in permissions_for_roles(list(roles or []))}
+
+
 @dataclass
 class Tool:
     name: str
@@ -184,6 +191,31 @@ class ToolRegistry:
         tool = self.get(name)
         started = time.perf_counter()
         retries = 0
+
+        # ``required_permission`` was declared on every tool and read by nothing, which made
+        # it documentation wearing the costume of a control. It is checked here, at the one
+        # place every path goes through -- the engine's tool node and the direct-invocation
+        # endpoint alike -- so a capability cannot be reached through one because the other
+        # was the one that checked. Tools that declare no permission are unaffected.
+        if tool.required_permission and not _permits(ctx.roles, tool.required_permission):
+            result = ToolResult(
+                ok=False,
+                tool=name,
+                error=f"Tool '{name}' requires the '{tool.required_permission}' permission",
+                latency_ms=(time.perf_counter() - started) * 1000,
+                metadata={"code": "forbidden", "required_permission": tool.required_permission},
+            )
+            tool_calls_total.labels(name, "forbidden").inc()
+            log.warning(
+                "tool_permission_denied",
+                tool=name,
+                required=tool.required_permission,
+                roles=ctx.roles,
+                execution=ctx.execution_id,
+                user=ctx.user_email,
+            )
+            await self._record(tool, result, "degraded")
+            return result
 
         try:
             args = tool.args_model(**(arguments or {}))

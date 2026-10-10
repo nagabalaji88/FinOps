@@ -591,6 +591,8 @@ implement a control, name the rule it implements.
 | `docs/GUARDRAILS.md` | Every rail, the fail-closed rules, degradation |
 | `docs/LLM_LAYER.md` | Provider selection, failure classification, redaction, JSON repair |
 | `docs/VALIDATION.md` | The conformance harness and all 28 scenarios |
+| `docs/COMPLIANCE.md` | EU AI Act: reason codes, fairness, generated Annex IV documentation |
+| `docs/MCP.md` | Third-party MCP tool servers, and the defaults they are adopted under |
 | `docs/API.md` | Endpoint reference |
 | `docs/SECURITY.md` | Authn/authz, RBAC, audit, secrets |
 | `docs/DEPLOYMENT.md` | Compose, Helm, migrations, promotion on upgrade |

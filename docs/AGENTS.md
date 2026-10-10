@@ -90,6 +90,14 @@ Rules that keep tools safe:
 - **One predicate, both paths.** `Tool.requires_human_review` combines the two, and both
   the execution engine and `POST /tools/{name}/invoke` check it — a gated write cannot be
   reached through the endpoint because the engine was the one that checked.
+- **A third-party tool is a tool.** Tools adopted from an MCP server are registered in this
+  same registry as `mcp.<server>.<tool>`, so they inherit every rule above rather than
+  needing them reimplemented. They are gated by default, because nothing about them was
+  audited here. See [`docs/MCP.md`](MCP.md).
+- **Permissions are enforced, not declared.** `required_permission` is checked in
+  `ToolRegistry.invoke`, so it holds on both paths like the approval gate does. No built-in
+  tool sets one today; MCP tools require `tool:invoke_external`. It used to be read by
+  nothing, which made it documentation wearing the costume of a control.
 - **Return data, not prose.** The model composes the narrative; the tool returns facts.
 - **Fail loudly.** Raise `NotFoundError` or `ValidationError` with details rather than
   returning an empty result that reads like a real answer.

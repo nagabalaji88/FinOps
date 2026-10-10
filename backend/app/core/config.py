@@ -32,6 +32,10 @@ class Settings(BaseSettings):
 
     # --- Core ---------------------------------------------------------------
     app_name: str = "FinOps AI Command Center"
+    #: Single source for the version the API advertises and the compliance documentation
+    #: records. Technical documentation that names a different version than the running
+    #: service is documentation for something else.
+    app_version: str = "1.0.0"
     environment: Literal["local", "dev", "staging", "production"] = "local"
     debug: bool = False
     api_prefix: str = "/api/v1"
@@ -169,6 +173,17 @@ class Settings(BaseSettings):
     #: ledger already prices a cache read at the catalogue's `cached_input_price_per_mtok`,
     #: so turning this off changes spend, not correctness.
     prompt_caching_enabled: bool = True
+
+    # --- Model Context Protocol ----------------------------------------------
+    #: Third-party MCP servers whose tools agents may use, as a JSON array. Each entry is
+    #: `{"name", "url", "token_env"?, "headers"?, "timeout_seconds"?, "allowed_tools"?,
+    #: "read_only_tools"?}`. A credential is named, not embedded: `token_env` is the
+    #: environment variable to read it from. Empty means no external tools, which is the
+    #: default -- adopting someone else's tool is an explicit act.
+    mcp_servers: str = ""
+    #: Off by default. With it off the configuration is still parsed and reported by the
+    #: readiness endpoint, so a deployment can be staged before anything is adopted.
+    mcp_enabled: bool = False
 
     # --- NeMo Guardrails -----------------------------------------------------
     # Rail configurations live in app/guardrails/configs/<agent_key>/. Deterministic rails

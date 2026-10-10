@@ -24,6 +24,11 @@ class Permission(StrEnum):
     KNOWLEDGE_WRITE = "knowledge:write"
     TOOL_READ = "tool:read"
     TOOL_INVOKE = "tool:invoke"
+    #: Reaching a tool hosted by a third party (an MCP server) rather than by this
+    #: platform. Separate from TOOL_INVOKE on purpose: the code on the other end was not
+    #: written or reviewed here, so being allowed to run our tools is not the same decision
+    #: as being allowed to run someone else's.
+    TOOL_INVOKE_EXTERNAL = "tool:invoke_external"
     SERVICE_READ = "service:read"
     SECURITY_READ = "security:read"
     SECURITY_ADMIN = "security:admin"
@@ -71,9 +76,14 @@ AUDITOR = READ_ONLY | {Permission.AUDIT_READ, Permission.SECURITY_READ, Permissi
 
 ADMIN = set(Permission)
 
+#: Not in OPERATOR. An operator can run every tool this platform ships; reaching a
+#: third-party MCP server is a further grant an organisation makes deliberately, by adding
+#: TOOL_INVOKE_EXTERNAL to the roles it intends. The default is therefore that enabling an
+#: MCP server does not by itself give the people already running agents a new reach.
 ROLE_PERMISSIONS: dict[str, set[Permission]] = {
     "admin": ADMIN,
-    "platform_engineer": BUILDER | {Permission.SECURITY_READ, Permission.FEATURE_FLAG_ADMIN},
+    "platform_engineer": BUILDER
+    | {Permission.SECURITY_READ, Permission.FEATURE_FLAG_ADMIN, Permission.TOOL_INVOKE_EXTERNAL},
     "agent_builder": BUILDER,
     "operator": OPERATOR,
     "approver": APPROVER,
