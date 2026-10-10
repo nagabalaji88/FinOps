@@ -59,7 +59,17 @@ spec:
         - name: beat
           image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag | default .Chart.AppVersion }}"
           command: ["celery"]
-          args: ["-A", "app.workers.celery_app.celery_app", "beat", "--loglevel=info"]
+          # Beat persists its schedule to disk. The default location is the working
+          # directory, which containerSecurityContext mounts read-only, so it is pointed at
+          # the writable volume below -- otherwise the scheduler dies on its first tick.
+          args:
+            - "-A"
+            - "app.workers.celery_app.celery_app"
+            - "beat"
+            - "--loglevel=info"
+            - "--schedule=/tmp/celerybeat-schedule"
           envFrom: {{- include "finops.envFrom" . | nindent 12 }}
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
 {{- end }}

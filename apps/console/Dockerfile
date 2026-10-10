@@ -23,8 +23,15 @@ RUN npm run build --workspace @finops/console
 
 FROM nginx:1.27-alpine AS runtime
 RUN rm /etc/nginx/conf.d/default.conf
-COPY --from=builder /app/apps/console/dist /usr/share/nginx/html
-COPY apps/console/nginx.conf /etc/nginx/conf.d/finops.conf
+COPY --from=builder --chown=nginx:nginx /app/apps/console/dist /usr/share/nginx/html
+COPY --chown=nginx:nginx apps/console/nginx.conf /etc/nginx/conf.d/finops.conf
+# Run as the image's unprivileged nginx user (uid 101). The server listens on 8080, above
+# the privileged range, so it never needs root. Its only writable paths are the cache and
+# the pid file; the deployments mount an emptyDir over each so the root filesystem can be
+# mounted read-only.
+RUN chown -R nginx:nginx /var/cache/nginx \
+    && touch /var/run/nginx.pid && chown nginx:nginx /var/run/nginx.pid
+USER nginx
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=4s CMD wget -qO- http://localhost:8080/healthz || exit 1
 CMD ["nginx", "-g", "daemon off;"]

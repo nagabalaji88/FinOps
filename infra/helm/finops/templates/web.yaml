@@ -30,6 +30,13 @@ spec:
         {{- include "finops.labels" $ | nindent 8 }}
         app.kubernetes.io/component: {{ $key }}
     spec:
+      # nginx runs as uid 101 and writes only to the two volumes below, so the root
+      # filesystem is mounted read-only. fsGroup makes those emptyDirs writable by it.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: web
           image: "{{ $app.image.repository }}:{{ $app.image.tag | default $.Chart.AppVersion }}"
@@ -39,6 +46,7 @@ spec:
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 10
+          securityContext: {{- toYaml $.Values.containerSecurityContext | nindent 12 }}
           volumeMounts:
             - { name: cache, mountPath: /var/cache/nginx }
             - { name: run, mountPath: /var/run }

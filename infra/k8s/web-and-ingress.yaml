@@ -17,7 +17,11 @@ spec:
     metadata:
       labels: { app: finops-execute, component: web }
     spec:
-      securityContext: { runAsNonRoot: true, runAsUser: 101 }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: web
           image: ghcr.io/nagabalaji88/agent-execute:1.0.0
@@ -30,6 +34,7 @@ spec:
             periodSeconds: 10
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
           volumeMounts:
             - { name: cache, mountPath: /var/cache/nginx }
@@ -60,7 +65,11 @@ spec:
     metadata:
       labels: { app: finops-console, component: web }
     spec:
-      securityContext: { runAsNonRoot: true, runAsUser: 101 }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: web
           image: ghcr.io/nagabalaji88/agent-console:1.0.0
@@ -73,6 +82,7 @@ spec:
             periodSeconds: 10
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
           volumeMounts:
             - { name: cache, mountPath: /var/cache/nginx }

@@ -48,18 +48,35 @@ spec:
     metadata:
       labels: { app: finops-beat, component: scheduler }
     spec:
-      securityContext: { runAsNonRoot: true, runAsUser: 10001 }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
       containers:
         - name: beat
           image: ghcr.io/nagabalaji88/agent-api:1.0.0
           command: ["celery"]
-          args: ["-A", "app.workers.celery_app.celery_app", "beat", "--loglevel=info"]
+          # Beat persists its schedule to disk. Default is the working directory, which is
+          # read-only here, so point it at the writable volume below or the scheduler
+          # crashes on its first tick.
+          args:
+            - "-A"
+            - "app.workers.celery_app.celery_app"
+            - "beat"
+            - "--loglevel=info"
+            - "--schedule=/tmp/celerybeat-schedule"
           envFrom:
             - configMapRef: { name: finops-config }
             - secretRef: { name: finops-secrets }
           resources:
             requests: { cpu: 100m, memory: 256Mi }
             limits: { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts: [{ name: tmp, mountPath: /tmp }]
+      volumes: [{ name: tmp, emptyDir: {} }]
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -75,6 +92,10 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            seccompProfile: { type: RuntimeDefault }
           containers:
             - name: retention
               image: ghcr.io/nagabalaji88/agent-api:1.0.0
@@ -82,3 +103,9 @@ spec:
               envFrom:
                 - configMapRef: { name: finops-config }
                 - secretRef: { name: finops-secrets }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              volumeMounts: [{ name: tmp, mountPath: /tmp }]
+          volumes: [{ name: tmp, emptyDir: {} }]
