@@ -10,8 +10,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
+import jwt
 from fastapi import APIRouter, Request, status
-from jose import JWTError, jwt
+from jwt import PyJWTError
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -735,6 +736,13 @@ async def _oidc_signing_keys(base: str) -> dict[str, Any]:
     return keys
 
 
+#: Asymmetric only. The forgery in CVE-2026-85394 and its predecessor CVE-2024-33663 is an
+#: HS* token presented where an RS*/ES* one is expected, so excluding the symmetric family
+#: here is the control, not a preference. TestJoseAlgorithmConfusionMitigation fails the
+#: build if this list grows one.
+_SSO_SIGNING_ALGORITHMS = ["RS256", "RS384", "RS512", "ES256", "ES384"]
+
+
 async def _verified_id_token(base: str, id_token: str, *, nonce: str) -> dict[str, Any]:
     """Validate the ID token's signature, issuer, audience and nonce.
 
@@ -743,15 +751,22 @@ async def _verified_id_token(base: str, id_token: str, *, nonce: str) -> dict[st
     these checks is what lets a token minted for another client be replayed here.
     """
     try:
+        # Select the signing key by `kid` rather than trying the whole set: a JWKS holds
+        # the keys for every algorithm the provider offers, and letting the library pick
+        # is how a token signed with the wrong one slips through.
+        key_set = jwt.PyJWKSet.from_dict(await _oidc_signing_keys(base))
+        kid = jwt.get_unverified_header(id_token).get("kid")
+        signing_key = next((k for k in key_set.keys if k.key_id == kid), None)
+        if signing_key is None:
+            raise AuthError("SSO identity token was signed by an unknown key")
         claims = jwt.decode(
             id_token,
-            await _oidc_signing_keys(base),
-            algorithms=["RS256", "RS384", "RS512", "ES256", "ES384"],
+            signing_key.key,
+            algorithms=_SSO_SIGNING_ALGORITHMS,
             audience=settings.keycloak_client_id,
             issuer=base,
-            options={"verify_at_hash": False},
         )
-    except JWTError as exc:
+    except PyJWTError as exc:
         # A rejected identity assertion is a failed sign-in, not a server fault.
         raise AuthError("SSO identity token failed validation", details={"reason": str(exc)}) from exc
     if claims.get("nonce") != nonce:

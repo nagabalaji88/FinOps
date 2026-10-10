@@ -278,6 +278,7 @@ class PlannerNode(Node):
             cached=response.usage.cached_input_tokens,
             cost=response.cost_usd,
         )
+        plan_was_recovered = plan is not None
         plan = plan or {
             "objective": str(state.input.get("query") or state.input.get("objective") or "")[:400],
             "steps": [],
@@ -286,10 +287,36 @@ class PlannerNode(Node):
             "risk_level": "medium",
             "raw": response.content[:2000],
         }
+        if not plan_was_recovered:
+            # `chat_json` already spent a corrective round trip and still got nothing
+            # parseable. Carrying on is reasonable -- the reasoning node can usually still
+            # do the work -- but doing it silently is not: this fallback names no tools and
+            # calls the risk medium, so a run that was never planned is indistinguishable
+            # from one that was planned and found nothing to do.
+            state.validation_findings.append(
+                {
+                    "check": "planner_output_parsed",
+                    "status": "fail",
+                    "detail": (
+                        "The planner's reply could not be parsed as JSON after a corrective "
+                        "call, so the run proceeded on a default plan: no required tools and "
+                        f"an assumed risk level of medium. Model: {response.model}."
+                    ),
+                }
+            )
+            log.warning(
+                "planner_plan_unparseable",
+                execution_id=state.execution_id,
+                agent=state.agent_key,
+                model=response.model,
+                truncated=response.truncated,
+            )
         state.plan = plan
         state.reasoning_log.append(f"Plan: {plan.get('objective', '')}")
         await ctx.close_span(
             span,
+            status="ok" if plan_was_recovered else "error",
+            error=None if plan_was_recovered else "planner reply was not parseable JSON",
             outputs=plan,
             attributes={"model": response.model, "provider": response.provider},
             tokens_input=response.usage.input_tokens,

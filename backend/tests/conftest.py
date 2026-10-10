@@ -26,7 +26,10 @@ os.environ.setdefault("LOG_JSON", "false")
 os.environ.setdefault("LOG_LEVEL", "WARNING")
 _db_fd, _db_path = tempfile.mkstemp(suffix=".db", prefix="finops-test-")
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_db_path}"
-os.environ["JWT_SECRET"] = "test-secret-key-for-suite-only"
+# At least 32 bytes: RFC 7518 s3.2 sets that floor for HS256 and PyJWT warns below it.
+# production_misconfigurations() enforces the same minimum, so the suite should not
+# run on a key production would refuse.
+os.environ["JWT_SECRET"] = "test-secret-key-for-the-suite-only-32b+"
 os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = "TestPassword!2026"
 # Ensure no real provider is reachable from the suite.
 for var in (

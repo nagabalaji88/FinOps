@@ -11,8 +11,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import bcrypt
+import jwt
 import pyotp
-from jose import JWTError, jwt
+from jwt import PyJWTError
 
 from app.core.config import settings
 from app.core.errors import AuthError
@@ -76,7 +77,7 @@ def create_mfa_enrolment_token(*, user_id: str, secret: str) -> str:
 def decode_token(token: str, *, expected_type: str = ACCESS) -> dict[str, Any]:
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-    except JWTError as exc:
+    except PyJWTError as exc:
         raise AuthError("Invalid or expired token", details={"reason": str(exc)}) from exc
     if payload.get("typ") != expected_type:
         raise AuthError("Wrong token type")

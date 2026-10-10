@@ -290,6 +290,30 @@ class TestRunnerEndToEnd:
         assert result.verdict == "blocked", result.note
         assert "no provider configured" in (result.note or "")
 
+    async def test_an_unparseable_plan_is_reported_rather_than_silently_defaulted(
+        self, _register_scripted_model
+    ):
+        """A run that was never planned must not look like one that found nothing to do.
+
+        When the planner's reply will not parse -- even after `chat_json` spends its
+        corrective call -- the node falls back to a default plan naming no tools and
+        assuming medium risk. Proceeding is defensible; proceeding quietly is not, because
+        nothing downstream could tell the difference.
+        """
+        provider = _register_scripted_model
+        provider.queue_text("I am afraid I cannot produce JSON today.")  # planner
+        provider.queue_text("I am afraid I cannot produce JSON today.")  # the repair call
+        provider.queue_text("An answer composed without a plan.")
+        await self._point_agent_at_scripted_model("knowledge_assistant")
+
+        result = await ValidationRunner().run_scenario(by_id("KA-01"))
+
+        assert result.observed is not None
+        findings = {f["check"]: f for f in (result.observed.validation_findings or [])}
+        assert "planner_output_parsed" in findings, findings
+        assert findings["planner_output_parsed"]["status"] == "fail"
+        assert "default plan" in findings["planner_output_parsed"]["detail"]
+
     async def test_knowledge_scenario_passes_against_a_correct_answer(self, _register_scripted_model):
         provider = _register_scripted_model
         provider.queue_text(

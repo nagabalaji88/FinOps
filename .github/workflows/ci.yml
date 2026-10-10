@@ -138,15 +138,20 @@ jobs:
       - name: Trivy filesystem scan
         # `aquasecurity/trivy-action@0.28.0` no longer resolves -- the tag was removed
         # upstream, so this job died in "Set up job" without scanning anything, which is
-        # why the security gate has been reporting nothing rather than reporting clean.
-        # Running Aqua's published image directly removes the dependency on a marketplace
-        # tag that can vanish, and keeps third-party action code out of the runner's
-        # credentialed context. Pin this to a digest once one can be resolved.
+        # why the security gate reported nothing rather than reporting clean. Running
+        # Aqua's published image directly removes the dependency on a marketplace tag that
+        # can vanish, and keeps third-party action code out of the runner's credentialed
+        # context.
+        #
+        # Pinned to a released version rather than a digest: Docker Hub rate-limits
+        # anonymous manifest requests and the digest could not be resolved when this was
+        # written. Prefer a digest when you can get one --
+        #   docker buildx imagetools inspect aquasec/trivy:0.75.0 --format '{{.Manifest.Digest}}'
         run: |
           docker run --rm \
             -v "$PWD:/workspace" \
             -v /tmp/trivy-cache:/root/.cache/trivy \
-            aquasec/trivy:latest fs /workspace \
+            aquasec/trivy:0.75.0 fs /workspace \
               --scanners vuln,secret,misconfig \
               --format sarif --output /workspace/trivy.sarif \
               --severity CRITICAL,HIGH --ignore-unfixed --no-progress
@@ -170,25 +175,13 @@ jobs:
           # the third-party tree we ship.
           /tmp/audit-venv/bin/pip freeze --exclude-editable \
             | grep -v '^finops-command-center' > /tmp/audit-requirements.txt
-          # PYSEC-2026-1325 (ecdsa, Minerva timing attack on P-256) has no upstream fix.
-          # `ecdsa` is present only as python-jose's pure-Python fallback backend: this
-          # platform signs with HS256 through the `cryptography` backend and no code path
-          # reaches it. Reviewed 2026-08-09; drop this once python-jose releases without it.
-          #
-          # CVE-2026-85394 (python-jose, HS256 forgery via DER public key accepted as an
-          # HMAC key) also has no upstream fix -- 3.5.0 is the latest release and the
-          # advisory covers "through 3.5.0". It is exploitable only where the verifier has
-          # not restricted the accepted algorithms. Both of ours have: the SSO identity
-          # token is verified against RS*/ES* only with HS* excluded, and the platform's own
-          # tokens pin a single algorithm against a secret no caller supplies.
-          # TestJoseAlgorithmConfusionMitigation in tests/test_prompt_caching.py fails the
-          # build if either allowlist is widened, so this ignore cannot rot into a real
-          # vulnerability. python-jose now carries two unfixed advisories and this is the
-          # second incomplete fix for the same bug class (CVE-2024-33663) -- migrating to a
-          # maintained JWT library is tracked separately. Reviewed 2026-10-10.
-          /tmp/audit-venv/bin/pip-audit --strict --desc \
-            --ignore-vuln PYSEC-2026-1325 \
-            --ignore-vuln CVE-2026-85394 -r /tmp/audit-requirements.txt
+          # No advisories are accepted. Both that used to be here came from python-jose:
+          # PYSEC-2026-1325 in the `ecdsa` backend it pulled in, and CVE-2026-85394, an
+          # HS256 forgery that was itself the second incomplete fix for the same bug.
+          # Replacing it with PyJWT removed the dependency and both advisories with it,
+          # which is a better answer than a documented exception. Keep this list empty:
+          # an accepted advisory needs a reason and a guard, not just an id.
+          /tmp/audit-venv/bin/pip-audit --strict --desc -r /tmp/audit-requirements.txt
 
   images:
     name: Build container images
@@ -280,8 +273,12 @@ jobs:
         # kubeconform checks the manifests against published schemas entirely offline;
         # -ignore-missing-schemas lets the ExternalSecret CRD past rather than failing on a
         # kind it has no schema for.
+        # kubeconform, pinned by digest (resolved 2026-10-10 from ghcr.io/yannh/kubeconform:latest).
+        # A digest is immutable, so this cannot repeat the failure that started all of
+        # this: a pinned tag deleted upstream, taking the gate down with it.
         run: |
-          docker run --rm -v "$PWD/infra/k8s:/manifests" ghcr.io/yannh/kubeconform:latest \
+          docker run --rm -v "$PWD/infra/k8s:/manifests" \
+            ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e \
             -strict -summary -ignore-missing-schemas /manifests
 
   e2e:
