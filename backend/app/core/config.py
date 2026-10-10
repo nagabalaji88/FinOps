@@ -162,6 +162,14 @@ class Settings(BaseSettings):
 
     default_model: str = "claude-haiku-4-5"
 
+    #: Ask providers to cache the stable prefix of each request -- the system prompt and
+    #: the tool schemas, which an agent re-sends on every iteration of its reasoning loop.
+    #: Anthropic requires this to be requested explicitly with `cache_control` breakpoints;
+    #: OpenAI-compatible endpoints cache automatically and only report the hit. The cost
+    #: ledger already prices a cache read at the catalogue's `cached_input_price_per_mtok`,
+    #: so turning this off changes spend, not correctness.
+    prompt_caching_enabled: bool = True
+
     # --- NeMo Guardrails -----------------------------------------------------
     # Rail configurations live in app/guardrails/configs/<agent_key>/. Deterministic rails
     # run with no credentials; the LLM-backed self-check rails need a provider and are

@@ -174,8 +174,21 @@ jobs:
           # `ecdsa` is present only as python-jose's pure-Python fallback backend: this
           # platform signs with HS256 through the `cryptography` backend and no code path
           # reaches it. Reviewed 2026-08-09; drop this once python-jose releases without it.
+          #
+          # CVE-2026-85394 (python-jose, HS256 forgery via DER public key accepted as an
+          # HMAC key) also has no upstream fix -- 3.5.0 is the latest release and the
+          # advisory covers "through 3.5.0". It is exploitable only where the verifier has
+          # not restricted the accepted algorithms. Both of ours have: the SSO identity
+          # token is verified against RS*/ES* only with HS* excluded, and the platform's own
+          # tokens pin a single algorithm against a secret no caller supplies.
+          # TestJoseAlgorithmConfusionMitigation in tests/test_prompt_caching.py fails the
+          # build if either allowlist is widened, so this ignore cannot rot into a real
+          # vulnerability. python-jose now carries two unfixed advisories and this is the
+          # second incomplete fix for the same bug class (CVE-2024-33663) -- migrating to a
+          # maintained JWT library is tracked separately. Reviewed 2026-10-10.
           /tmp/audit-venv/bin/pip-audit --strict --desc \
-            --ignore-vuln PYSEC-2026-1325 -r /tmp/audit-requirements.txt
+            --ignore-vuln PYSEC-2026-1325 \
+            --ignore-vuln CVE-2026-85394 -r /tmp/audit-requirements.txt
 
   images:
     name: Build container images

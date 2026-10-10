@@ -122,6 +122,28 @@ by the `auditor` role and exportable.
   and the runtime default seccomp profile.
 - CORS is restricted to the console origin.
 
+## Supply chain
+
+CI scans the tree with Trivy on every run and audits the resolved Python dependency
+closure with `pip-audit --strict`, which fails the build on any advisory that is not
+explicitly accepted. Two are currently accepted, both unfixed upstream and both recorded
+with their reasoning in `.github/workflows/ci.yml`:
+
+- **PYSEC-2026-1325** — `ecdsa`, Minerva timing attack on P-256. Present only as
+  python-jose's pure-Python fallback backend; signing goes through `cryptography` and no
+  code path reaches it.
+- **CVE-2026-85394** — `python-jose` accepts a DER-encoded public key as an HMAC key, so a
+  party holding the service's public key can forge an HS256 token. It applies only where
+  the verifier has not restricted the accepted algorithms. Ours do: an SSO identity token
+  is verified against RS\*/ES\* with HS\* excluded, and the platform's own tokens pin a
+  single algorithm against a secret no caller supplies. `TestJoseAlgorithmConfusionMitigation`
+  fails the build if either allowlist is widened, so the acceptance cannot quietly become a
+  real exposure.
+
+python-jose now carries two unfixed advisories, and CVE-2026-85394 is the second incomplete
+fix for the same bug class (after CVE-2024-33663). Migrating to a maintained JWT library is
+the standing remediation rather than a third acceptance.
+
 ## Reporting a vulnerability
 
 Contact the platform security team. Do not open a public issue. Include reproduction

@@ -87,6 +87,31 @@ block — common behind a gateway — tokens are estimated from the text rather 
 zero. Reporting zero would silently make every call through that gateway free, and the
 per-execution budget cap is computed from these numbers.
 
+## Prompt caching
+
+An agent re-sends the same system prompt and the same tool schemas on every iteration of
+its reasoning loop — four to nine calls per execution — and only the message tail differs.
+That prefix is the bulk of the input tokens, so it is marked as cacheable and billed as a
+cache read on the calls that follow.
+
+OpenAI-compatible endpoints cache automatically and only report the hit, which the provider
+reads from `prompt_tokens_details.cached_tokens`. Anthropic requires the cache to be asked
+for: `_cacheable()` sets a `cache_control` breakpoint on the last tool and on the last
+system block, which covers the tool array and the system prompt respectively. Both are
+stable; no breakpoint ever goes on a message, because a cached prefix has to be
+byte-identical between calls and the messages are the part that changes.
+
+The two breakpoints hit on different horizons. The system prompt is composed once per
+execution — it carries the plan and any retrieved context — so caching it pays back across
+that run's own iterations. The tool schemas are identical for every execution of an agent,
+so that breakpoint also hits across runs while the entry is live.
+
+`compute_cost()` prices a cache read at the catalogue's `cached_input_price_per_mtok`
+(roughly a tenth of base input on Anthropic, a half on OpenAI); models from hosts that do
+not offer caching leave it unset and are charged at full input price, which keeps the
+budget cap conservative. `PROMPT_CACHING_ENABLED=false` stops requesting it, which changes
+spend rather than behaviour.
+
 ## JSON replies
 
 `extract_json_object()` (`app/llm/jsonio.py`) recovers an object from a reply that is not

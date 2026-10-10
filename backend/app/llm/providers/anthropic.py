@@ -19,6 +19,32 @@ from app.llm.types import LLMResponse, Message, StreamChunk, ToolCall, ToolSchem
 
 API_VERSION = "2023-06-01"
 
+#: Marks the end of a cacheable prefix. Anthropic caches `tools`, then `system`, then
+#: `messages`, in that order, and caches everything up to a breakpoint -- so a breakpoint on
+#: the last tool covers the whole tool array, and one on the last system block covers the
+#: tools and the system prompt together.
+_CACHE_CONTROL = {"type": "ephemeral"}
+
+
+def _cacheable(payload: dict[str, Any]) -> None:
+    """Mark the stable prefix of a request so the provider bills it as a cache read.
+
+    An agent re-sends the same system prompt and the same tool schemas on every iteration
+    of its reasoning loop -- four to nine calls per execution here -- and only the message
+    tail differs. That prefix is the bulk of the input tokens and, without a breakpoint,
+    Anthropic charges full price for it every time. OpenAI-compatible endpoints do this
+    automatically; Anthropic requires it to be asked for.
+
+    The prefix has to be byte-identical between calls to hit, which is why the breakpoints
+    go on `tools` and `system` and never on a message.
+    """
+    tools = payload.get("tools")
+    if tools:
+        tools[-1] = {**tools[-1], "cache_control": _CACHE_CONTROL}
+    system = payload.get("system")
+    if isinstance(system, list) and system:
+        system[-1] = {**system[-1], "cache_control": _CACHE_CONTROL}
+
 
 def _split_messages(messages: list[Message]) -> tuple[str, list[dict[str, Any]]]:
     system_parts: list[str] = []
@@ -99,7 +125,9 @@ class AnthropicProvider(LLMProvider):
             "temperature": temperature,
         }
         if system:
-            payload["system"] = system
+            # Block form rather than a bare string: a cache breakpoint attaches to a
+            # content block, and the API accepts either shape.
+            payload["system"] = [{"type": "text", "text": system}]
         if top_p is not None:
             payload["top_p"] = top_p
         if stop:
@@ -126,9 +154,12 @@ class AnthropicProvider(LLMProvider):
         self._require()
         payload = self._payload(model, messages, tools, temperature, max_tokens, top_p, stop)
         if json_mode and not tools:
-            payload["system"] = (
-                payload.get("system", "") + "\n\nRespond with a single valid JSON object and nothing else."
-            ).strip()
+            payload.setdefault("system", []).append(
+                {"type": "text", "text": "Respond with a single valid JSON object and nothing else."}
+            )
+        # After json_mode, so the breakpoint lands on the final system block.
+        if settings.prompt_caching_enabled:
+            _cacheable(payload)
         if extra:
             payload.update(extra)
         started = time.perf_counter()
@@ -195,6 +226,8 @@ class AnthropicProvider(LLMProvider):
         payload = self._payload(
             model, messages, tools, temperature, max_tokens, kwargs.get("top_p"), kwargs.get("stop")
         )
+        if settings.prompt_caching_enabled:
+            _cacheable(payload)
         payload["stream"] = True
         started = time.perf_counter()
         text_parts: list[str] = []
