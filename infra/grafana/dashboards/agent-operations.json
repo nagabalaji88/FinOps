@@ -1,0 +1,199 @@
+{
+  "uid": "finops-agent-ops",
+  "title": "FinOps · Agent Operations",
+  "tags": ["finops", "agents"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "agent",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "PROMETHEUS" },
+        "query": "label_values(finops_agent_executions_total, agent)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Executions (rate/min)",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(finops_agent_executions_total{agent=~\"$agent\"}[5m])) * 60",
+          "legendFormat": "executions"
+        }
+      ],
+      "fieldConfig": { "defaults": { "decimals": 2, "unit": "short" } }
+    },
+    {
+      "type": "stat",
+      "title": "Success rate",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(finops_agent_executions_total{agent=~\"$agent\",status=\"succeeded\"}[15m])) / clamp_min(sum(rate(finops_agent_executions_total{agent=~\"$agent\"}[15m])), 0.001)",
+          "legendFormat": "success"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.9 },
+              { "color": "green", "value": 0.97 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "p95 execution latency",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(finops_agent_execution_duration_seconds_bucket{agent=~\"$agent\"}[10m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 2 } }
+    },
+    {
+      "type": "stat",
+      "title": "LLM spend (24h)",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [{ "expr": "sum(increase(finops_llm_cost_usd_total[24h]))", "legendFormat": "usd" }],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 } }
+    },
+    {
+      "type": "stat",
+      "title": "Queue depth",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "targets": [{ "expr": "sum(finops_queue_depth)", "legendFormat": "queued" }]
+    },
+    {
+      "type": "stat",
+      "title": "Active executions",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "targets": [{ "expr": "finops_active_executions", "legendFormat": "in flight" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Executions by status",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(finops_agent_executions_total{agent=~\"$agent\"}[5m])) by (status)",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Execution latency percentiles",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(finops_agent_execution_duration_seconds_bucket{agent=~\"$agent\"}[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(finops_agent_execution_duration_seconds_bucket{agent=~\"$agent\"}[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(finops_agent_execution_duration_seconds_bucket{agent=~\"$agent\"}[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Token throughput by model",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "sum(rate(finops_llm_tokens_total[5m])) by (model, kind)",
+          "legendFormat": "{{model}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "LLM latency by provider",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(finops_llm_latency_seconds_bucket[5m])) by (le, provider))",
+          "legendFormat": "{{provider}} p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Tool calls",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        { "expr": "sum(rate(finops_tool_calls_total[5m])) by (tool, status)", "legendFormat": "{{tool}} {{status}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Circuit breaker state",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [{ "expr": "finops_circuit_state", "legendFormat": "{{name}}" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "closed" }, "1": { "text": "half-open" }, "2": { "text": "open" } } }
+          ]
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Approvals",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 28 },
+      "targets": [
+        { "expr": "sum(rate(finops_approvals_total[15m])) by (decision)", "legendFormat": "{{decision}}" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Cache hit rate",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 28 },
+      "targets": [
+        {
+          "expr": "sum(rate(finops_cache_events_total{event=\"hit\"}[10m])) / clamp_min(sum(rate(finops_cache_events_total[10m])), 0.001)",
+          "legendFormat": "hit rate"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Vector search latency",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 28 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(finops_vector_search_seconds_bucket[10m])) by (le, collection))",
+          "legendFormat": "{{collection}} p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    }
+  ]
+}

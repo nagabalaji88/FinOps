@@ -1,0 +1,236 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --surface: 250 250 251;
+    --surface-muted: 244 244 246;
+    --surface-raised: 255 255 255;
+    --ink: 17 20 26;
+    --ink-muted: 92 99 112;
+    --ink-subtle: 141 148 161;
+    --line: 226 228 233;
+    --accent: 24 28 38;
+    --accent-soft: 236 237 240;
+    --state-ok: 22 138 96;
+    --state-warn: 181 121 12;
+    --state-err: 197 55 55;
+    --state-info: 51 91 178;
+    --state-idle: 141 148 161;
+    --glass-bg: 255 255 255;
+    --glass-alpha: 0.72;
+  }
+
+  .dark {
+    --surface: 10 11 14;
+    --surface-muted: 16 18 23;
+    --surface-raised: 22 24 30;
+    --ink: 236 238 243;
+    --ink-muted: 156 163 176;
+    --ink-subtle: 111 118 132;
+    --line: 39 42 51;
+    --accent: 240 242 246;
+    --accent-soft: 33 36 45;
+    --state-ok: 61 190 137;
+    --state-warn: 226 168 62;
+    --state-err: 234 106 106;
+    --state-info: 116 155 235;
+    --state-idle: 111 118 132;
+    --glass-bg: 24 26 33;
+    --glass-alpha: 0.66;
+  }
+
+  * {
+    @apply border-line;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-surface text-ink font-sans antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'ss01', 'tnum';
+    background-image:
+      radial-gradient(60rem 40rem at 12% -10%, rgb(var(--accent) / 0.05), transparent 60%),
+      radial-gradient(50rem 34rem at 92% 0%, rgb(var(--state-info) / 0.05), transparent 55%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: rgb(var(--ink) / 0.12);
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-offset-2 ring-offset-surface;
+    --tw-ring-color: rgb(var(--ink) / 0.45);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--ink) / 0.16);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--ink) / 0.28);
+    background-clip: content-box;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .glass {
+    background: rgb(var(--glass-bg) / var(--glass-alpha));
+    @apply backdrop-blur-xl border border-line/70 shadow-glass;
+  }
+
+  .card {
+    @apply glass rounded-2xl;
+  }
+
+  .card-hover {
+    @apply transition-all duration-300 ease-spring hover:shadow-glass-lg hover:-translate-y-0.5;
+  }
+
+  .metric-label {
+    @apply text-2xs font-medium uppercase tracking-[0.09em] text-ink-subtle;
+  }
+
+  .metric-value {
+    @apply text-[1.7rem] leading-none font-semibold tabular-nums tracking-tight;
+  }
+
+  .divider {
+    @apply h-px w-full bg-line/70;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line/80 px-2.5 py-0.5
+           text-2xs font-medium text-ink-muted;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-sm font-medium
+           transition-all duration-200 ease-spring disabled:opacity-45 disabled:pointer-events-none
+           select-none;
+  }
+
+  .btn-primary {
+    @apply btn bg-ink text-surface hover:opacity-90 active:scale-[0.985];
+  }
+
+  .btn-ghost {
+    @apply btn text-ink-muted hover:bg-accent-soft hover:text-ink;
+  }
+
+  .btn-outline {
+    @apply btn border border-line bg-surface-raised/60 text-ink hover:bg-accent-soft;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-line bg-surface-raised/70 px-3 py-2 text-sm
+           text-ink placeholder:text-ink-subtle transition-colors
+           focus:border-ink/30 focus:bg-surface-raised;
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden rounded-lg bg-accent-soft;
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full animate-shimmer;
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      rgb(var(--ink) / 0.06),
+      transparent
+    );
+  }
+
+  .table-row {
+    @apply border-b border-line/60 transition-colors hover:bg-accent-soft/50;
+  }
+
+  .scroll-x {
+    @apply overflow-x-auto;
+    scrollbar-width: thin;
+  }
+
+  /* Globe: a ping on a high-risk marker. */
+  .globe-ping {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: globe-ping 2.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  }
+}
+
+@keyframes globe-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  70%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .grid-dense {
+    grid-auto-flow: dense;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* React Flow theme integration */
+.react-flow__attribution {
+  display: none;
+}
+.react-flow__edge-path {
+  stroke: rgb(var(--line));
+  stroke-width: 1.5;
+}
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke: rgb(var(--state-info));
+}
+.react-flow__handle {
+  background: rgb(var(--ink-subtle));
+  border: none;
+  width: 6px;
+  height: 6px;
+}
+.react-flow__controls-button {
+  background: rgb(var(--surface-raised));
+  border-color: rgb(var(--line));
+  color: rgb(var(--ink-muted));
+}

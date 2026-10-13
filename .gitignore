@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+# setuptools' build directory: a partial, stale duplicate of backend/app that every
+# `pip install` rewrites. It is regenerated on demand and must not be version controlled.
+backend/build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.db
+*.db-wal
+*.db-shm
+var/
+
+# Node
+node_modules/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Release bundles (produced by scripts/package.sh)
+release/*
+!release/*.zip
+!release/*.sha256
+
+# Agent tooling. These accumulate machine-specific paths and per-developer command
+# allowlists, which are not the repository's business to carry.
+.claude/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

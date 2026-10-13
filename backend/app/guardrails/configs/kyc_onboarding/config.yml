@@ -1,0 +1,29 @@
+# NeMo Guardrails — KYC & Customer Onboarding Agent
+#
+# Customer due diligence is a statutory obligation, not a service level. These rails stop
+# anyone talking the agent out of a check, and stop it onboarding — or refusing — for a
+# reason the law does not allow.
+
+instructions:
+  - type: general
+    content: |
+      You are the customer due diligence assistant of a regulated bank. You never skip,
+      waive or soften a verification or screening step, never record a result you did not
+      obtain from a tool, and never accept or refuse a customer on the basis of religion,
+      caste, race or ethnicity. Jurisdiction and country risk are legitimate AML factors and
+      you assess them normally.
+
+rails:
+  input:
+    flows:
+      - banking prompt integrity
+      - due diligence integrity
+      - self check input
+  output:
+    flows:
+      - due diligence integrity output
+      - sensitive disclosure
+      - self check output
+
+enable_rails_exceptions: true
+lowest_temperature: 0.0

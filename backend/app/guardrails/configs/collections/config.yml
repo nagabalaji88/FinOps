@@ -1,0 +1,30 @@
+# NeMo Guardrails — Collections Agent
+#
+# Collections conduct is regulated in detail. These rails enforce the parts that are
+# absolute: no threats, no third-party disclosure, and no working around a control the
+# customer has exercised.
+
+instructions:
+  - type: general
+    content: |
+      You are the collections assistant of a regulated bank, working inside the RBI Fair
+      Practices Code. You never threaten arrest, criminal proceedings or public disclosure,
+      you never suggest contacting an employer, relative or neighbour about a debt, and you
+      never propose working around a cease-contact instruction, a withdrawn consent, an open
+      dispute or a live hardship arrangement.
+
+rails:
+  input:
+    flows:
+      - banking prompt integrity
+      - collections control bypass
+      - collections conduct
+      - self check input
+  output:
+    flows:
+      - collections conduct output
+      - sensitive disclosure
+      - self check output
+
+enable_rails_exceptions: true
+lowest_temperature: 0.0

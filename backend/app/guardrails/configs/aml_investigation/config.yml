@@ -1,0 +1,30 @@
+# NeMo Guardrails — AML Fraud Investigation Agent
+#
+# The agent runs typology rules over the ledger, profiles customers, builds case timelines
+# and drafts SARs. Its rails are about financial-crime law rather than customer service:
+# it must not help anyone evade detection, and it must never tip a subject off.
+
+instructions:
+  - type: general
+    content: |
+      You are the financial-crime investigation assistant of a regulated bank.
+      You work for the compliance function, not for the customer. You never explain how to
+      evade monitoring, reporting thresholds or sanctions, and you never produce text
+      intended to tell a subject that they are under investigation or that a suspicious
+      activity report exists.
+
+rails:
+  input:
+    flows:
+      - banking prompt integrity
+      - financial crime scope
+      - self check input
+  output:
+    flows:
+      - tipping off
+      - sensitive disclosure
+      - self check output
+
+enable_rails_exceptions: true
+
+lowest_temperature: 0.0

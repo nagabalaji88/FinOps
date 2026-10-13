@@ -1,0 +1,29 @@
+define bot refuse blocked request
+  "I can't help with that request."
+
+define flow banking prompt integrity
+  $rail_hit = execute check_prompt_integrity
+  if $rail_hit
+    create event InputRailException(message=$rail_hit)
+    stop
+
+define flow due diligence integrity
+  $rail_hit = execute check_kyc_integrity
+  if $rail_hit
+    create event InputRailException(message=$rail_hit)
+    stop
+
+define flow due diligence integrity output
+  $rail_hit = execute check_kyc_integrity
+  if $rail_hit
+    create event OutputRailException(message=$rail_hit)
+    stop
+
+define flow sensitive disclosure
+  $rail_hit = execute sensitive_labels
+  if $rail_hit
+    $rail_masked = $rail_hit
+    $redacted = execute redact_sensitive_output
+    if $redacted
+      bot $redacted
+      stop
