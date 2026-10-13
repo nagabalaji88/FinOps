@@ -160,7 +160,10 @@ async def cmd_annex_iv(output: str | None, fmt: str) -> int:
     import app.tools  # noqa: F401  -- importing registers every tool with the registry
     from app.compliance.annex_iv import collect, to_markdown
 
-    await ensure_schema()
+    # Deliberately does not call `ensure_schema`: generating documentation reads the
+    # platform and must not alter it. It also means this can run against a deployment that
+    # is already serving -- `ensure_schema` opens a write transaction, and on SQLite that
+    # contends with the running API for the same file.
     async with session_scope() as session:
         facts = await collect(session)
 

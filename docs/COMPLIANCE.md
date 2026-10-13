@@ -75,6 +75,18 @@ them. They are named in every report with that reason rather than omitted. Infer
 from a name or a postcode to produce a fairness number would create a special-category
 inference the applicant never consented to — a worse outcome than the gap it closes.
 
+### On the sample dataset
+
+Every customer in the sample banking seed has `nationality = "IN"`, so on seeded data the
+nationality report has one comparable group and correctly says `inconclusive` — including
+when its ratio is 1.00, because one group is not a comparison. `age_band` does produce a
+real comparison once decisions exist, since the seed spreads dates of birth.
+
+This is a property of the demo data, not a broken control. The seed is deliberately not
+rigged to produce a disparity for the report to find: manufacturing one would make the
+control look exercised while proving nothing about it. The arithmetic is proven in
+`test_compliance.py` instead, where the inputs are chosen to test the measurement.
+
 ### Where it surfaces
 
 Every conformance run carries a `fairness` section: a table per attribute in the Markdown
